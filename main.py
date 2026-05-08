@@ -9,6 +9,8 @@ import falcon.asgi as falcon
 from pymongo import MongoClient
 import logging
 import argparse
+from mongo import client as mongo_client_py
+
 import sys
 import csv
 import os
@@ -53,10 +55,13 @@ def build_parser():
     usr_register.add_argument('--age', help='', type=int, required=True)
     usr_register.add_argument('--location', help='', type=str, required=True)
     usr_register.add_argument('--preferences', help='', required=True)
+    usr_register.set_defaults(func=mongo_register)
+
     # FR-02: User Login
     usr_login = subparsers.add_parser('login', help='Login a user')
     usr_login.add_argument('--email', help='', type=str, required=True)
     usr_login.add_argument('--password', help='', required=True)
+
     # FR-03: Update User Information | MUST BE LOGGED IN
     usr_update = subparsers.add_parser('update', help='Update a user | MUST BE LOGGED IN')
     usr_update.add_argument('--username', help='', type=str, required=True)
@@ -65,26 +70,32 @@ def build_parser():
     usr_update.add_argument('--age', help='', type=int, required=True)
     usr_update.add_argument('--location', help='', type=str, required=True)
     usr_update.add_argument('--preferences', help='', required=True)
+
     # FR-04: Manage Preferences | MUST BE LOGGED IN
     # Add preferences
     usr_add_pref = subparsers.add_parser('add_pref', help='Add a preference | MUST BE LOGGED IN')
     usr_rem_pref = subparsers.add_parser('rem_pref', help='Remove a preference | MUST BE LOGGED IN')
+
     # FR-06: Create Content | MUST BE LOGGED IN
     cnt_create = subparsers.add_parser('create_content', help='Create content | MUST BE ADMIN')
     cnt_create.add_argument('--title', help='', type=str, required=True)
     cnt_create.add_argument('--type', help='', type=str, required=True)
+
     # FR-07: Like Content | MUST BE LOGGED IN
     usr_like = subparsers.add_parser('like_content', help='Like content | MUST BE LOGGED IN')
     usr_like.add_argument('--content_id', "-cid", help='', type=str, required=True)
+
     # FR-08: Comment on Content | MUST BE LOGGED IN
     usr_comment = subparsers.add_parser('comment_content', help='Comment on content | MUST BE LOGGED IN')
     usr_comment.add_argument('--content_id', "-cid", help='', type=str, required=True)
     usr_comment.add_argument('--text', '-t', help='', type=str, required=True)
+
     # FR-09: Get Comments by Content
     cnt_get_comments = subparsers.add_parser('get_comments', help='Get comments by content')
     cnt_get_comments.add_argument('--content_id', "-cid", help='', type=str, required=True)
+
     # FR-10: Get Comments by User
-    usr_get_comments = subparsers.add_parser('get_comments', help='Returns authenticated user comments')
+    usr_get_comments = subparsers.add_parser('get_own_comments', help='Returns authenticated user comments')
 
     # FR-13: Share Content (Internal)
     usr_share = subparsers.add_parser('share_content', help='Share content with a user')
@@ -98,15 +109,15 @@ def build_parser():
 
     # FR-21: Create Notes
     usr_create_note = subparsers.add_parser('create_note', help='Create a note | MUST BE LOGGED IN')
-    usr_create_note.add_argument('--title', "-t", help='', type=str, required=True)
-    usr_create_note.add_argument('--text', "-t", help='', type=str, required=True)
+    usr_create_note.add_argument('--title', "-ttl", help='', type=str, required=True)
+    usr_create_note.add_argument('--text', "-txt", help='', type=str, required=True)
     # FR-22: Retrieve Notes
     usr_get_notes = subparsers.add_parser('get_notes', help='Retrieve notes | MUST BE LOGGED IN')
     # FR-23: Update/Delete Notes
     usr_update_note = subparsers.add_parser('update_note', help='Update/Delete notes | MUST BE LOGGED IN')
     usr_update_note.add_argument('--note_id', "-nid", help='', type=str, required=True)
-    usr_update_note.add_argument('--title', "-t", help='', type=str)
-    usr_update_note.add_argument('--text', "-t", help='', type=str)
+    usr_update_note.add_argument('--title', "-ttl", help='', type=str)
+    usr_update_note.add_argument('--text', "-txt", help='', type=str)
 
     usr_delete_note = subparsers.add_parser('delete_note', help='Update/Delete notes | MUST BE LOGGED IN')
     usr_delete_note.add_argument('--note_id', "-nid", help='', type=str, required=True)
@@ -131,10 +142,6 @@ def build_parser():
 
     # CHROMADB
 
-
-
-
-
     # CASSANDRA
     # FR-16: Retrieve Activity History | MUST BE LOGGED IN
     # FR-17: Filter Activity History
@@ -144,9 +151,15 @@ def build_parser():
 
     # FR-19: Activity Logging
     # FR-20: Daily Active Users
-
     return parser
 
+def mongo_register(args):
+    print("ENTRO A MONGO_REGISTER")
+    mongo_client_py.mongo_register(args)
 
 if __name__ == "__main__":
     mong = mongo_init()
+
+    parser = build_parser()
+    args = parser.parse_args()
+    args.func(args)
