@@ -1,5 +1,4 @@
 
-
-mongo_register(args)::
+def mongo_register(args):
     print(args)
     return None
