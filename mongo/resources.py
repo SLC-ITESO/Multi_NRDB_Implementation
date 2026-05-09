@@ -15,7 +15,6 @@ handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(
 log.addHandler(handler)
 
 
-
 class UserResource:
     def __init__(self, db):
         self.db = db
@@ -41,12 +40,34 @@ class UserResource:
 
     async def on_post(self, req, resp):
         data = await req.media
-        required_fields = ['username', 'email', 'password_hash', 'age', 'location', 'preferences']
+
+        print("DATA:")
+        print(data)
+
+        required_fields = [
+            'username',
+            'email',
+            'password_hash',
+            'age',
+            'location',
+            'preferences'
+        ]
+
         for field in required_fields:
             if field not in data:
-                raise falcon.HTTPBadRequest(title='Missing field', description=f'{field} is required')
+                raise falcon.HTTPBadRequest(
+                    title='Missing field',
+                    description=f'{field} is required'
+                )
+
+        if self.db.users.find_one({"email": data["email"]}):
+            raise falcon.HTTPConflict(
+                title='Email already registered',
+                description='The provided email is already in use.'
+            )
 
         now = datetime.now()
+
         user = {
             "username": data["username"],
             "email": data["email"],
@@ -57,12 +78,71 @@ class UserResource:
             "created_at": now,
             "updated_at": now
         }
+
+        print("USER:")
+        print(user)
+
         result = self.db.users.insert_one(user)
+
+        # Conversion of ObjectId to string
         user["_id"] = str(result.inserted_id)
-        
+
+        # Conversion of datetime objects to JSON-safe strings
+        user["created_at"] = user["created_at"].isoformat()
+        user["updated_at"] = user["updated_at"].isoformat()
+
         resp.media = user
         resp.status = falcon.HTTP_201
+
         log.info(f"User registered: {user['username']}")
+
+    async def on_put(self, req, resp, user_id):
+        data = await req.media
+        update_doc = {}
+        if 'password_hash' in data:
+            update_doc['password_hash'] = data['password_hash']
+        if 'age' in data:
+            update_doc['age'] = data['age']
+        if 'location' in data:
+            update_doc['location'] = data['location']
+        if 'preferences' in data:
+            update_doc['preferences'] = data['preferences']
+        
+        update_doc['updated_at'] = datetime.now()
+            
+        if len(update_doc) == 1:
+            raise falcon.HTTPBadRequest(title='No fields to update')
+            
+        result = self.db.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": update_doc}
+        )
+        if result.matched_count == 0:
+            raise falcon.HTTPNotFound()
+        
+        resp.status = falcon.HTTP_200
+        log.info(f"User updated: {user_id}")
+
+class AuthResource:
+    def __init__(self, db):
+        self.db = db
+
+    async def on_post(self, req, resp):
+        data = await req.media
+        if 'email' not in data or 'password_hash' not in data:
+            raise falcon.HTTPBadRequest(title='Missing fields', description='email and password_hash are required')
+
+        user = self.db.users.find_one({"email": data['email']})
+        if not user or user['password_hash'] != data['password_hash']:
+            raise falcon.HTTPUnauthorized(description='Invalid email or password')
+
+        resp.media = {
+            "user_id": str(user["_id"]),
+            "username": user["username"],
+            "email": user["email"]
+        }
+        resp.status = falcon.HTTP_200
+        log.info(f"User logged in: {user['username']}")
 
 class NotesResource:
     def __init__(self, db):

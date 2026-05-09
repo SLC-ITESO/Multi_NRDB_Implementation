@@ -1,3 +1,6 @@
 .idea
 .venv
 tests
+
+multidrdb_mongo.log
+.session.json

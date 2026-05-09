@@ -9,7 +9,9 @@ import falcon.asgi as falcon
 from pymongo import MongoClient
 import logging
 import argparse
+
 from mongo import client as mongo_client_py
+from mongo import resources
 
 import sys
 import csv
@@ -27,19 +29,33 @@ class LoggingMiddleware:
 
 
 # Initialize MongoDB client and database
+mongo_client = MongoClient('mongodb://localhost:27017/')
+mongo_db = mongo_client.final_project
 
-def mongo_init():
-    
-    try:
-        mongo_client = MongoClient('mongodb://localhost:27017/', serverSelectionTimeoutMS=5000)
-        mongo_client.server_info()
-        logger.info("Connected to MongoDB")
-    except Exception as e:
-        logger.error(f"MongoDB connection failed: {e}")
-        raise
+# Create the Falcon application
+app = falcon.App(middleware=[LoggingMiddleware()])
 
-    mongo_db = mongo_client.final_proj
-    return mongo_db
+    # Instantiate the resources
+user_resource = resources.UserResource(mongo_db)
+auth_resource = resources.AuthResource(mongo_db)
+notes_resource = resources.NotesResource(mongo_db)
+content_resource = resources.ContentResource(mongo_db)
+comment_resource = resources.CommentResource(mongo_db)
+likes_resource = resources.ContentLikesResource(mongo_db)
+share_resource = resources.InternalShareResource(mongo_db)
+external_share_resource = resources.ExternalShareResource(mongo_db)
+
+    # Add routes to serve the resources
+app.add_route('/user', user_resource)
+app.add_route('/user/{user_id}', user_resource)
+app.add_route('/login', auth_resource)
+app.add_route('/notes', notes_resource)
+app.add_route('/content', content_resource)
+app.add_route('/comment', comment_resource)
+app.add_route('/likes', likes_resource)
+app.add_route('/share', share_resource)
+app.add_route('/external_share', external_share_resource)
+
 
 def build_parser():
     # Initialize argument parser
@@ -64,14 +80,11 @@ def build_parser():
     usr_login.add_argument('--password', help='', required=True)
     usr_login.set_defaults(func=mongo_login)
 
+    usr_logout = subparsers.add_parser('logout', help='Logout a user')
+    usr_logout.set_defaults(func=mongo_logoff)
+
     # FR-03: Update User Information | MUST BE LOGGED IN
     usr_update = subparsers.add_parser('update', help='Update a user | MUST BE LOGGED IN')
-    usr_update.add_argument('--username', help='', type=str, required=True)
-    usr_update.add_argument('--email', help='', type=str, required=True)
-    usr_update.add_argument('--password', help='', required=True)
-    usr_update.add_argument('--age', help='', type=int, required=True)
-    usr_update.add_argument('--location', help='', type=str, required=True)
-    usr_update.add_argument('--preferences', help='', required=True)
     usr_update.set_defaults(func=mongo_update)
 
     # FR-04: Manage Preferences | MUST BE LOGGED IN
@@ -177,6 +190,10 @@ def mongo_login(args):
     print("ENTRO A MONGO_LOGIN")
     mongo_client_py.mongo_login(args)
 
+def mongo_logoff(args):
+    os.remove(mongo_client_py.SESSION_FILE)
+    print("User logged off")
+
 def mongo_update(args):
     print("ENTRO A MONGO_UPDATE")
     mongo_client_py.mongo_update(args)
@@ -234,7 +251,6 @@ def mongo_delete_note(args):
     mongo_client_py.mongo_delete_note(args)
 
 if __name__ == "__main__":
-    mong = mongo_init()
 
     parser = build_parser()
     args = parser.parse_args()
