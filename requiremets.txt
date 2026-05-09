@@ -2,3 +2,4 @@ falcon
 pymongo
 uvicorn
 requests
+cassandra-driver
