@@ -29,6 +29,7 @@ class LoggingMiddleware:
 # Initialize MongoDB client and database
 
 def mongo_init():
+    
     try:
         mongo_client = MongoClient('mongodb://localhost:27017/', serverSelectionTimeoutMS=5000)
         mongo_client.server_info()
@@ -61,6 +62,7 @@ def build_parser():
     usr_login = subparsers.add_parser('login', help='Login a user')
     usr_login.add_argument('--email', help='', type=str, required=True)
     usr_login.add_argument('--password', help='', required=True)
+    usr_login.set_defaults(func=mongo_login)
 
     # FR-03: Update User Information | MUST BE LOGGED IN
     usr_update = subparsers.add_parser('update', help='Update a user | MUST BE LOGGED IN')
@@ -70,57 +72,71 @@ def build_parser():
     usr_update.add_argument('--age', help='', type=int, required=True)
     usr_update.add_argument('--location', help='', type=str, required=True)
     usr_update.add_argument('--preferences', help='', required=True)
+    usr_update.set_defaults(func=mongo_update)
 
     # FR-04: Manage Preferences | MUST BE LOGGED IN
     # Add preferences
     usr_add_pref = subparsers.add_parser('add_pref', help='Add a preference | MUST BE LOGGED IN')
+    usr_add_pref.set_defaults(func=mongo_add_pref)
     usr_rem_pref = subparsers.add_parser('rem_pref', help='Remove a preference | MUST BE LOGGED IN')
+    usr_rem_pref.set_defaults(func=mongo_rem_pref)
 
     # FR-06: Create Content | MUST BE LOGGED IN
     cnt_create = subparsers.add_parser('create_content', help='Create content | MUST BE ADMIN')
     cnt_create.add_argument('--title', help='', type=str, required=True)
     cnt_create.add_argument('--type', help='', type=str, required=True)
+    cnt_create.set_defaults(func=mongo_create_content)
 
     # FR-07: Like Content | MUST BE LOGGED IN
     usr_like = subparsers.add_parser('like_content', help='Like content | MUST BE LOGGED IN')
     usr_like.add_argument('--content_id', "-cid", help='', type=str, required=True)
+    usr_like.set_defaults(func=mongo_like_content)
 
     # FR-08: Comment on Content | MUST BE LOGGED IN
     usr_comment = subparsers.add_parser('comment_content', help='Comment on content | MUST BE LOGGED IN')
     usr_comment.add_argument('--content_id', "-cid", help='', type=str, required=True)
     usr_comment.add_argument('--text', '-t', help='', type=str, required=True)
+    usr_comment.set_defaults(func=mongo_comment_content)
 
     # FR-09: Get Comments by Content
     cnt_get_comments = subparsers.add_parser('get_comments', help='Get comments by content')
     cnt_get_comments.add_argument('--content_id', "-cid", help='', type=str, required=True)
+    cnt_get_comments.set_defaults(func=mongo_get_comments)
 
     # FR-10: Get Comments by User
     usr_get_comments = subparsers.add_parser('get_own_comments', help='Returns authenticated user comments')
+    usr_get_comments.set_defaults(func=mongo_get_own_comments)
 
     # FR-13: Share Content (Internal)
     usr_share = subparsers.add_parser('share_content', help='Share content with a user')
     usr_share.add_argument('--content_id', "-cid", help='', type=str, required=True)
     usr_share.add_argument('--user_id', "-uid", help='', type=str, required=True)
+    usr_share.set_defaults(func=mongo_share_content)
 
     # FR-18: External Sharing Tracking  | MUST BE LOGGED IN | CASSANDRA LOGGING
     usr_share_ext = subparsers.add_parser('share_content_ext', help='Share content with a user')
     usr_share_ext.add_argument('--content_id', "-cid", help='', type=str, required=True)
     usr_share_ext.add_argument('--platform', "-p", help='Twitter | Insta | Facebook | etc', type=str, required=True)
+    usr_share_ext.set_defaults(func=mongo_share_content_ext)
 
     # FR-21: Create Notes
     usr_create_note = subparsers.add_parser('create_note', help='Create a note | MUST BE LOGGED IN')
     usr_create_note.add_argument('--title', "-ttl", help='', type=str, required=True)
     usr_create_note.add_argument('--text', "-txt", help='', type=str, required=True)
+    usr_create_note.set_defaults(func=mongo_create_note)
     # FR-22: Retrieve Notes
     usr_get_notes = subparsers.add_parser('get_notes', help='Retrieve notes | MUST BE LOGGED IN')
+    usr_get_notes.set_defaults(func=mongo_get_notes)
     # FR-23: Update/Delete Notes
     usr_update_note = subparsers.add_parser('update_note', help='Update/Delete notes | MUST BE LOGGED IN')
     usr_update_note.add_argument('--note_id', "-nid", help='', type=str, required=True)
     usr_update_note.add_argument('--title', "-ttl", help='', type=str)
     usr_update_note.add_argument('--text', "-txt", help='', type=str)
+    usr_update_note.set_defaults(func=mongo_update_note)
 
     usr_delete_note = subparsers.add_parser('delete_note', help='Update/Delete notes | MUST BE LOGGED IN')
     usr_delete_note.add_argument('--note_id', "-nid", help='', type=str, required=True)
+    usr_delete_note.set_defaults(func=mongo_delete_note)
 
     # DGRAPH
     # FR-11: Follow Users
@@ -156,6 +172,66 @@ def build_parser():
 def mongo_register(args):
     print("ENTRO A MONGO_REGISTER")
     mongo_client_py.mongo_register(args)
+
+def mongo_login(args):
+    print("ENTRO A MONGO_LOGIN")
+    mongo_client_py.mongo_login(args)
+
+def mongo_update(args):
+    print("ENTRO A MONGO_UPDATE")
+    mongo_client_py.mongo_update(args)
+
+def mongo_add_pref(args):
+    print("ENTRO A MONGO_ADD_PREF")
+    mongo_client_py.mongo_add_pref(args)
+
+def mongo_rem_pref(args):
+    print("ENTRO A MONGO_REM_PREF")
+    mongo_client_py.mongo_rem_pref(args)
+
+def mongo_create_content(args):
+    print("ENTRO A MONGO_CREATE_CONTENT")
+    mongo_client_py.mongo_create_content(args)
+
+def mongo_like_content(args):
+    print("ENTRO A MONGO_LIKE_CONTENT")
+    mongo_client_py.mongo_like_content(args)
+
+def mongo_comment_content(args):
+    print("ENTRO A MONGO_COMMENT_CONTENT")
+    mongo_client_py.mongo_comment_content(args)
+
+def mongo_get_comments(args):
+    print("ENTRO A MONGO_GET_COMMENTS")
+    mongo_client_py.mongo_get_comments(args)
+
+def mongo_get_own_comments(args):
+    print("ENTRO A MONGO_GET_OWN_COMMENTS")
+    mongo_client_py.mongo_get_own_comments(args)
+
+def mongo_share_content(args):
+    print("ENTRO A MONGO_SHARE_CONTENT")
+    mongo_client_py.mongo_share_content(args)
+
+def mongo_share_content_ext(args):
+    print("ENTRO A MONGO_SHARE_CONTENT_EXT")
+    mongo_client_py.mongo_share_content_ext(args)
+
+def mongo_create_note(args):
+    print("ENTRO A MONGO_CREATE_NOTE")
+    mongo_client_py.mongo_create_note(args)
+
+def mongo_get_notes(args):
+    print("ENTRO A MONGO_GET_NOTES")
+    mongo_client_py.mongo_get_notes(args)
+
+def mongo_update_note(args):
+    print("ENTRO A MONGO_UPDATE_NOTE")
+    mongo_client_py.mongo_update_note(args)
+
+def mongo_delete_note(args):
+    print("ENTRO A MONGO_DELETE_NOTE")
+    mongo_client_py.mongo_delete_note(args)
 
 if __name__ == "__main__":
     mong = mongo_init()
