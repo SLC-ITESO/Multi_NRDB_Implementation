@@ -56,6 +56,7 @@ app.add_route('/user', user_resource)
 app.add_route('/user/{user_id}', user_resource)
 app.add_route('/login', auth_resource)
 app.add_route('/notes', notes_resource)
+app.add_route('/notes/{note_id}', notes_resource)
 app.add_route('/content', content_resource)
 app.add_route('/comment', comment_resource)
 app.add_route('/likes', likes_resource)
@@ -103,6 +104,10 @@ def build_parser():
     usr_rem_pref = subparsers.add_parser('rem_pref', help='Remove a preference | MUST BE LOGGED IN')
     usr_rem_pref.set_defaults(func=mongo_rem_pref)
 
+    # get own profile
+    usr_get_profile = subparsers.add_parser('get_profile', help='Get own profile | MUST BE LOGGED IN')
+    usr_get_profile.set_defaults(func=mongo_get_prof)
+
     # FR-06: Create Content | MUST BE LOGGED IN
     cnt_create = subparsers.add_parser('create_content', help='Create content | MUST BE ADMIN')
     cnt_create.add_argument('--title', help='', type=str, required=True)
@@ -134,6 +139,9 @@ def build_parser():
     usr_share.add_argument('--content_id', "-cid", help='', type=str, required=True)
     usr_share.add_argument('--user_id', "-uid", help='', type=str, required=True)
     usr_share.set_defaults(func=mongo_share_content)
+
+
+    # MAYBE A GET OWN SHARED CONTENT???
 
     # FR-18: External Sharing Tracking  | MUST BE LOGGED IN | CASSANDRA LOGGING
     usr_share_ext = subparsers.add_parser('share_content_ext', help='Share content with a user')
@@ -254,6 +262,9 @@ def mongo_add_pref(args):
 def mongo_rem_pref(args):
     print("ENTRO A MONGO_REM_PREF")
     mongo_client_py.mongo_rem_pref(args)
+
+def mongo_get_prof(args):
+    mongo_client_py.mongo_get_prof(args)
 
 def mongo_create_content(args):
     print("ENTRO A MONGO_CREATE_CONTENT")
