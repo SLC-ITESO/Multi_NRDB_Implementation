@@ -2,38 +2,25 @@
 
 ## 1. Project Overview
 
-This project is a multi-database backend for a religious/wellness app. The system represents users who can register, log in, manage preferences, create and interact with content, write notes, follow other users, attend events, and search for helpful content.
+This project is a multi-database backend for a religious/wellness application. The app represents users who can register, log in, save personal notes, create content, follow other users, attend events, and search for helpful content.
 
-The main goal is not to build a production app. The goal is to demonstrate how different NoSQL databases solve different kinds of problems in the same project.
+The main idea of the project is to show how different NoSQL databases can work together in one system. We do not use only one database because the data is not all the same shape:
 
-The app uses multiple database paradigms because the data is not all the same shape:
+- MongoDB is useful for flexible JSON-style documents like users, notes, and content.
+- Dgraph is useful when the data is mostly relationships, like users following users or events connected to interests.
+- ChromaDB is useful when the query is semantic, meaning we search by meaning instead of exact text.
+- Cassandra is included as a design direction for activity/log data, but its runnable integration is still partial, so it is not part of the main demo.
 
-- User profiles, notes, comments, content, likes, and shares are document-style data, so MongoDB fits well.
-- Activity history and analytics are time/query-driven data, so Cassandra is the intended fit.
-- Follows, event attendance, and interest relationships are graph-shaped data, so Dgraph fits well.
-- Search by meaning and content recommendation need vector retrieval, so ChromaDB fits well.
+This is a university final project, not a production system. The code is intentionally simple so we can run it locally, explain it clearly, and connect each database choice to the requirements.
 
-In simple terms, this project shows that a non-relational solution can be built by choosing the right database for each kind of query instead of forcing one database to do everything.
+## 2. How the Project Is Organized
 
-Main implemented features right now:
+The project is controlled mainly from `main.py`.
 
-- CLI commands through `main.py`
-- Falcon API routes through `uvicorn`
-- MongoDB user/content/comment/note/share resources
-- Dgraph setup, seed, relationship queries, and recommendation queries
-- ChromaDB setup, seed, semantic search, content recommendation, and RAG-style context retrieval
-- Cassandra design files and parser placeholder, with runnable integration still partial
+`main.py` has two jobs:
 
-## 2. Important Concepts Before Running the Project
-
-Before running commands, it helps to understand how the project is organized.
-
-### The project is mainly controlled from `main.py`
-
-`main.py` does two important things:
-
-1. It creates the Falcon API app and registers routes like `/user`, `/graph/{action}`, and `/chroma/{action}`.
-2. It creates CLI commands with `argparse`, so we can run commands like:
+1. It creates the Falcon API and registers routes like `/user`, `/notes`, `/graph/{action}`, and `/chroma/{action}`.
+2. It creates CLI commands with `argparse`, so we can run commands such as:
 
 ```bash
 python3 main.py register ...
@@ -41,130 +28,78 @@ python3 main.py dgraph_seed
 python3 main.py semantic_search --query "anxiety and peace"
 ```
 
-### CLI commands trigger database operations
-
-Most CLI commands follow this idea:
+Most user commands follow this pattern:
 
 ```text
-terminal command -> main.py parser -> client file -> API resource -> database logic -> result printed
+terminal command
+  -> main.py parser
+  -> database client file
+  -> Falcon API resource
+  -> database model/query logic
+  -> database
+  -> JSON or printed result
 ```
 
-For example, Chroma semantic search goes through:
+There are two exceptions:
 
-```text
-main.py -> chroma/client.py -> /chroma/search -> chroma/resources.py -> chroma/chroma_model.py -> ChromaDB
-```
+- `dgraph_setup` and `dgraph_seed` talk directly to Dgraph because they are setup/admin commands.
+- `chroma_setup` and `chroma_seed` talk directly to ChromaDB because they prepare the local vector collection.
 
-### Docker Compose runs the database services
-
-`docker-compose.yml` now starts:
-
-- MongoDB on local port `27017`
-- Dgraph on local ports `8080` and `9080`
-
-So the normal database startup command is:
-
-```bash
-docker compose up -d
-```
-
-ChromaDB does not need a Docker container in this project. It stores local data in the `chroma_db/` folder.
-
-### Some commands need setup and seed first
-
-Dgraph and ChromaDB need setup/seed commands before demo queries return useful data:
-
-```bash
-python3 main.py dgraph_setup
-python3 main.py dgraph_seed
-python3 main.py chroma_setup
-python3 main.py chroma_seed
-```
-
-MongoDB does not currently have a separate seed command. Mongo data is created through CLI/API commands like `register`, `create_content`, and `create_note`.
-
-### Some commands need a logged-in user/session
-
-The CLI stores login state in a local file:
+The CLI stores login state in:
 
 ```text
 .session.json
 ```
 
-This file is created by `python3 main.py login ...`.
+That file is created by:
 
-Important Dgraph detail: the logged-in user originally comes from MongoDB, but Dgraph has its own graph nodes. For the demo, the Dgraph CLI commands copy the session user into Dgraph using the same `user_id`. That means a Mongo user like `demo@mail.com` can still use Dgraph commands such as `recommend_user`, `local_events`, and `recommend_events`.
+```bash
+python3 main.py login --email demo@mail.com --password 1234
+```
 
-### Resetting the project may require deleting containers, volumes, and session data
-
-If the demo breaks, we may need to reset:
-
-- Docker containers
-- Docker volumes, which store MongoDB and Dgraph data
-- the local ChromaDB folder `chroma_db/`
-- the local session file `.session.json`
-
+Dgraph detail: login happens through MongoDB, so the logged-in user has a MongoDB ObjectId. Before Dgraph user commands run, the Dgraph CLI makes sure that same user also exists as a Dgraph `User` node. This lets graph queries work with the real logged-in session user instead of only with hardcoded seed users like `u1`.
 
 ## 3. Technologies and Database Responsibilities
 
-| Technology | What it does in this project |
+| Technology | Role in this project |
 | --- | --- |
 | Python | Main language for the CLI, API, and database logic. |
-| Falcon | Lightweight API framework used by the resource classes. |
+| Falcon | API framework used by the resource classes. |
 | Uvicorn | Runs the Falcon ASGI app locally. |
-| Docker Compose | Starts MongoDB and Dgraph containers with one command. |
-| MongoDB | Stores document data: users, content, comments, likes, shares, notes. |
-| PyMongo | Connects the Falcon API resources to MongoDB. |
-| Cassandra | Intended for activity history, activity logging, daily active users, and analytics tables. Current code is partial. |
-| Dgraph | Stores graph data: users, follows, events, interests, attendance, recommendations. |
-| ChromaDB | Stores embedded content for semantic search and vector retrieval. |
+| Docker Compose | Starts MongoDB and Dgraph containers. |
+| MongoDB | Stores document-style data: users, notes, content, comments, likes, and shares. |
+| PyMongo | Python library used to connect API resources to MongoDB. |
+| Dgraph | Stores graph relationships: follows, attendance, interests, event topics, and recommendations. |
+| ChromaDB | Stores embeddings for semantic search, content recommendation, and RAG-style context retrieval. |
 | sentence-transformers | Provides the `all-MiniLM-L6-v2` embedding model used by ChromaDB. |
-| requests | Used by CLI clients to call the local API and by Dgraph code to call Dgraph HTTP. |
+| requests | Used by CLI clients to call the local API. |
+| Cassandra | Planned for activity history/logging tables; current runnable integration is partial. |
 
-### MongoDB responsibility
+### MongoDB
 
-MongoDB is the document database. It is used for regular app records that look like JSON documents:
+MongoDB stores data that naturally looks like documents:
 
 - users
+- notes
 - content
 - comments
 - likes
 - internal shares
 - external shares
-- notes
 
-MongoDB runs in Docker Compose as:
-
-```text
-service: mongodb
-container: final-project-mongodb
-local port: 27017
-```
-
-The Python app currently connects with:
+The app connects to MongoDB with:
 
 ```python
-MongoClient('mongodb://localhost:27017/')
+MongoClient("mongodb://localhost:27017/")
 ```
 
-That is correct because we run Python locally on the host machine. If the Python app were also inside Docker Compose, the connection string would normally become:
+This is correct for our setup because Python runs locally on the host machine while MongoDB runs in Docker. If the Python app were inside Docker too, the connection string would normally use the Compose service name:
 
 ```text
 mongodb://mongodb:27017/
 ```
 
-### Cassandra responsibility
-
-Cassandra is intended for query-driven activity tables:
-
-- activity by user
-- activity by date/day
-- activity by content
-- activity analytics like daily active users
-
-The current code has `cassandra/cassandra_model.py` and `cassandra/fixtures.py`, but there is no complete runnable Cassandra CLI/API flow yet. The parser includes `get-activity_history`, but it is not connected to a function with `set_defaults`.
-
-### Dgraph responsibility
+### Dgraph
 
 Dgraph stores relationship data:
 
@@ -175,96 +110,89 @@ Dgraph stores relationship data:
 (Event)-[event_topic]->(Interest)
 ```
 
-It supports:
+This supports graph queries such as:
 
-- user recommendations
-- event recommendations
-- local events
-- follower counts
-- attendee counts
+- recommending users who share interests
+- recommending users in the same location
+- finding local events
+- recommending events based on interests
+- counting followers and attendees using reverse edges
 
-The login/session user comes from MongoDB. Before Dgraph user commands run, `dgraph/client.py` checks the session and makes sure that same user also exists as a Dgraph `User` node. This keeps the demo simple: Mongo handles authentication, and Dgraph handles relationships for that same user id.
+### ChromaDB
 
-### ChromaDB responsibility
-
-ChromaDB stores content as embeddings. It supports:
+ChromaDB stores content as embeddings. In this project, we embed sample religious/wellness content and use it for:
 
 - semantic search
-- content recommendation by preferences
-- retrieving context for a future RAG answer
+- content recommendation from preferences
+- retrieval context for a future RAG answer
 
-It uses a local persistent folder:
+ChromaDB stores local data in:
 
 ```text
 chroma_db/
 ```
 
+### Cassandra
+
+Cassandra is intended for activity history, activity logging, and analytics-style queries. The current repository has Cassandra files and a parser placeholder, but the runnable command flow is not complete. For that reason, Cassandra is documented as partial and is not included in the main demo sequence.
+
 ## 4. Folder Structure
 
 ```text
 main.py                    Main API app and CLI parser
-
 docker-compose.yml         Starts MongoDB and Dgraph containers
 requirements.txt           Python dependencies
-requiremets.txt            Older misspelled dependency file kept for compatibility
 README.md                  General project README
 
 mongo/client.py            CLI helper functions for Mongo commands
 mongo/resources.py         Falcon resources for Mongo routes
 
-dgraph/dgraph_model.py     Dgraph schema, seed data, queries, mutations
+dgraph/dgraph_model.py     Dgraph schema, seed data, queries, and mutations
 dgraph/client.py           CLI helper functions for Dgraph commands
 dgraph/resources.py        Falcon resource for /graph/{action}
-dgraph/DGRAPH_README.md    Dgraph-specific documentation
+dgraph/DGRAPH_README.md    Dgraph-specific notes
 
-chroma/chroma_model.py     Chroma collection, seed data, semantic search logic
+chroma/chroma_model.py     Chroma collection, seed data, and semantic search logic
 chroma/client.py           CLI helper functions for Chroma commands
 chroma/resources.py        Falcon resource for /chroma/{action}
-chroma/CHROMA_README.md    Chroma-specific documentation
+chroma/CHROMA_README.md    Chroma-specific notes
 
-cassandra/cassandra_model.py   Cassandra model/design code, partial integration
+cassandra/cassandra_model.py   Cassandra design/model file, partial integration
 cassandra/fixtures.py          Cassandra fixture placeholder
 
-.session.json              Local login/session file used by CLI commands
+.session.json              Local CLI login/session file
 chroma_db/                 Local ChromaDB data folder created after seeding
 ```
 
 ## 5. Clean Start / Reset Instructions
 
-Para asegurar que todo está limpio, seguimos estos pasos.
+Before running the demo from a clean state, we normally reset the local environment with the following commands.
 
-Use this when the demo environment is messy or when old data is causing confusing results.
-
-### 1. Stop and remove Compose containers
+Stop and remove the running Compose containers:
 
 ```bash
 docker compose down
 ```
 
-This stops and removes the containers, but keeps Docker volumes. MongoDB and Dgraph data are kept.
+This stops MongoDB and Dgraph containers, but keeps their Docker volumes. Data is not deleted.
 
-### 2. Full reset: remove containers and volumes/data
+For a full reset, remove the containers and the Docker volumes:
 
 ```bash
 docker compose down -v
 ```
 
-This deletes the named Docker volumes:
+This deletes MongoDB and Dgraph data stored in Docker volumes. Use it when old demo data is causing conflicts, for example when `demo@mail.com` already exists.
 
-- `mongo-data`
-- `dgraph-data`
-
-Use this when we want a completely clean MongoDB and Dgraph.
-
-### 3. Remove local CLI session
+Remove the local CLI session:
 
 ```bash
 rm -f .session.json
 ```
 
-This logs out the local CLI session. It does not delete database data.
+This logs out the local CLI user. It does not delete database data.
 
-### 4. Remove local ChromaDB data
+Remove local ChromaDB data:
 
 ```bash
 rm -rf chroma_db
@@ -272,15 +200,13 @@ rm -rf chroma_db
 
 This deletes the local vector database folder. After this, run Chroma setup and seed again.
 
-### 5. Start containers again
+Start MongoDB and Dgraph again:
 
 ```bash
 docker compose up -d
 ```
 
-This starts MongoDB and Dgraph.
-
-### 6. Re-run setup and seed commands
+Recreate Dgraph and Chroma demo data:
 
 ```bash
 python3 main.py dgraph_setup
@@ -289,122 +215,109 @@ python3 main.py chroma_setup
 python3 main.py chroma_seed
 ```
 
-### Difference between reset commands
+Quick reset summary:
 
-| Command | Meaning |
+| Command | What it does |
 | --- | --- |
-| `docker compose down` | Stops/removes containers but keeps volumes/data. |
-| `docker compose down -v` | Stops/removes containers and deletes MongoDB/Dgraph volumes. Full reset. |
-| `rm -f .session.json` | Removes local login/session state only. |
+| `docker compose down` | Stops/removes containers but keeps MongoDB and Dgraph data. |
+| `docker compose down -v` | Stops/removes containers and deletes MongoDB/Dgraph volumes. |
+| `rm -f .session.json` | Removes local login state. |
 | `rm -rf chroma_db` | Deletes local ChromaDB vector data. |
-| setup/seed commands | Recreate schema/collections and load demo data. |
+| `docker compose up -d` | Starts MongoDB and Dgraph again. |
 
 ## 6. Initial Setup From Scratch
 
-### 1. Open the project folder
+Open the project folder:
 
 ```bash
 cd "/Users/mrmariano/Documents/LEARNING/ITESO/Semestre 4/Bases de Datos No Relacionales/Project/Team"
 ```
 
-### 2. Create a virtual environment
+Create and activate a virtual environment:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 ```
 
-### 3. Install dependencies
+Install dependencies:
 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
 
-Note: ChromaDB uses `sentence-transformers`. The first time Chroma runs, it may download the MiniLM model.
-
-### 4. Start database containers
+Start the database containers:
 
 ```bash
 docker compose up -d
-```
-
-Check containers:
-
-```bash
 docker compose ps
 ```
 
-Check Dgraph:
-
-```bash
-curl http://localhost:8080/health
-```
-
-MongoDB is available locally at:
+MongoDB should be available at:
 
 ```text
 mongodb://localhost:27017/
 ```
 
-### 5. Initialize Dgraph
+Dgraph should be available at:
+
+```text
+http://localhost:8080
+```
+
+Optional Dgraph health check:
+
+```bash
+curl http://localhost:8080/health
+```
+
+Prepare Dgraph:
 
 ```bash
 python3 main.py dgraph_setup
 python3 main.py dgraph_seed
 ```
 
-### 6. Initialize ChromaDB
+Prepare ChromaDB:
 
 ```bash
 python3 main.py chroma_setup
 python3 main.py chroma_seed
 ```
 
-### 7. Start the API server
-
-Run this in one terminal and leave it open:
+Start the API server in one terminal and leave it running:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-### 8. Use another terminal for CLI commands
+Use a second terminal for CLI commands.
 
-For user-based Dgraph/Chroma demo commands, register and log in through MongoDB first:
+If port `8000` is already busy, run the API on another port:
 
 ```bash
-python3 main.py register --username demo --email demo@mail.com --password 1234 --age 21 --location Guadalajara --preferences prayer
-python3 main.py login --email demo@mail.com --password 1234
-python3 main.py get_profile
+uvicorn main:app --reload --port 8001
 ```
 
-After login, `.session.json` stores the Mongo user id. When a Dgraph command runs, the CLI makes sure that same user also exists in Dgraph with the same id, location, and preferences.
+Then point the CLI to that port:
 
-## 7. Demo Script
+```bash
+export PROJECT_API_URL=http://localhost:8001
+```
 
-### Step 1 - Start database containers
+## 7. Complete Demo Flow
 
-Command:
+The main demo focuses on the implemented parts that currently work: MongoDB, Dgraph, and ChromaDB.
+
+### Step 1 - Start the databases
 
 ```bash
 docker compose up -d
 ```
 
-What this demonstrates:
-Docker Compose starts the local database services: MongoDB and Dgraph.
+This starts the database services used by the project. MongoDB stores document data and Dgraph stores graph data. ChromaDB is local and does not need a Docker container.
 
-Database used:
-MongoDB and Dgraph.
-
-Requirement / rubric:
-Project must be runnable locally and include database connection/setup logic.
-
-What to say:
-"This starts the database containers we need for the demo. MongoDB stores documents and Dgraph stores graph relationships."
-
-### Step 2 - Initialize graph and vector data
-
-Command:
+### Step 2 - Prepare Dgraph and ChromaDB
 
 ```bash
 python3 main.py dgraph_setup
@@ -413,41 +326,25 @@ python3 main.py chroma_setup
 python3 main.py chroma_seed
 ```
 
-What this demonstrates:
-Dgraph schema/seed and Chroma collection/seed are created.
+`dgraph_setup` installs the graph schema: predicates, indexes, reverse edges, and types. `dgraph_seed` inserts sample users, events, interests, and relationships.
 
-Database used:
-Dgraph and ChromaDB.
-
-Requirement / rubric:
-Setup scripts, seed/loading logic, graph schema, embeddings, vector data.
-
-What to say:
-"These commands prepare the demo data. Dgraph gets graph nodes and edges. ChromaDB gets content documents and embeddings."
+`chroma_setup` creates the local Chroma collection. `chroma_seed` stores sample content and generates embeddings with `all-MiniLM-L6-v2`.
 
 ### Step 3 - Start the API server
-
-Command:
 
 ```bash
 uvicorn main:app --reload
 ```
 
-What this demonstrates:
-The Falcon API is running and CLI clients can call local endpoints.
+Most CLI commands call the API first. The API then routes the request to the correct resource and database logic.
 
-Database used:
-API layer for MongoDB, Dgraph, and ChromaDB.
+General flow:
 
-Requirement / rubric:
-Functional code implementation and database connection logic.
+```text
+CLI command -> main.py parser -> client file -> Falcon resource -> database logic
+```
 
-What to say:
-"The project has both CLI commands and API resources. The CLI commands use this local API for most user actions."
-
-### Step 4 - Register and log in as the demo user
-
-Command:
+### Step 4 - MongoDB: register, login, and read profile
 
 ```bash
 python3 main.py register --username demo --email demo@mail.com --password 1234 --age 21 --location Guadalajara --preferences prayer
@@ -455,185 +352,250 @@ python3 main.py login --email demo@mail.com --password 1234
 python3 main.py get_profile
 ```
 
-What this demonstrates:
-MongoDB stores the user document, login works, and the CLI gets a real session user.
+This creates a MongoDB user document, authenticates that user, and reads the profile back from MongoDB. Login also creates `.session.json`, which later commands use as the current user.
 
-Database used:
-MongoDB, plus local `.session.json`.
+Internal flow:
 
-Requirement / rubric:
-FR-01 User Registration, FR-02 User Login, document database CRUD.
+```text
+main.py parser
+  -> mongo/client.py
+  -> /user or /login API route
+  -> mongo/resources.py
+  -> MongoDB users collection
+```
 
-Expected output:
-A user is created, login succeeds, and profile data is returned. The `.session.json` file stores the Mongo ObjectId for the logged-in user.
+If `demo@mail.com` already exists, either use another email or run a full reset with `docker compose down -v`.
 
-What to say:
-"This is the document database part. MongoDB stores the user profile, and the login command creates the session used by later commands."
+### Step 5 - MongoDB: create and retrieve a note
 
-Note: if `demo@mail.com` already exists, either use another email or reset Mongo volumes with `docker compose down -v`.
+```bash
+python3 main.py create_note --title "Demo note" --text "This is a personal note saved in MongoDB."
+python3 main.py get_notes
+```
 
-### Step 5 - Show Dgraph graph summary
+This is the clearest document-style operation in the demo. The note is stored as a MongoDB document with nested user information, title, text, and timestamps.
 
-Command:
+Internal flow:
+
+```text
+main.py parser
+  -> mongo/client.py
+  -> /notes API route
+  -> NotesResource
+  -> MongoDB notesResource collection
+```
+
+### Step 6 - MongoDB: create content
+
+```bash
+python3 main.py create_content --title "Peaceful Evening Prayer" --type prayer
+```
+
+This stores a content document in MongoDB. It shows another JSON-style record connected to the logged-in user.
+
+Internal flow:
+
+```text
+main.py parser
+  -> mongo/client.py
+  -> /content API route
+  -> ContentResource
+  -> MongoDB content collection
+```
+
+### Step 7 - Dgraph: graph summary
 
 ```bash
 python3 main.py graph_summary
 ```
 
-What this demonstrates:
-Dgraph contains graph data and uses reverse traversal counts.
+This verifies that graph data exists and that reverse traversal counts are working. The output includes users with `follower_count` and events with `attendee_count`.
 
-Database used:
-Dgraph.
+The logged-in MongoDB user is also copied into Dgraph before this command runs, using the same `user_id`. This is why the session user can participate in graph recommendations.
 
-Requirement / rubric:
-Graph relationships, reverse traversal, aggregation.
+Internal flow:
 
-Expected output:
-Seed users plus the logged-in Mongo user, with `follower_count`, and events with `attendee_count`.
+```text
+main.py parser
+  -> dgraph/client.py
+  -> ensure session user exists in Dgraph
+  -> /graph/summary API route
+  -> DgraphResource
+  -> dgraph_model.graph_summary()
+  -> Dgraph query with count(~follows) and count(~attends)
+```
 
-What to say:
-"Dgraph stores relationships as edges. The logged-in Mongo user is also represented in Dgraph so graph commands work with the real session id."
-
-### Step 6 - Show Dgraph recommendations
-
-Command:
+### Step 8 - Dgraph: user recommendations
 
 ```bash
 python3 main.py recommend_user
 python3 main.py recommend_user_loc
+```
+
+`recommend_user` recommends users who share interests with the logged-in user. `recommend_user_loc` recommends users in the same location.
+
+These commands are graph-oriented because they start from the current user and traverse relationships or filters:
+
+```text
+User -> interested_in -> Interest -> ~interested_in -> other Users
+```
+
+Internal flow:
+
+```text
+main.py parser
+  -> dgraph/client.py
+  -> /graph/{action} API route
+  -> DgraphResource
+  -> Dgraph query
+  -> graph traversal result as JSON
+```
+
+### Step 9 - Dgraph: local and recommended events
+
+```bash
 python3 main.py local_events
 python3 main.py recommend_events
 ```
 
-What this demonstrates:
-Graph queries and recommendations.
+`local_events` finds future events in the user's city. `recommend_events` finds future events that share interests with the user.
 
-Database used:
-Dgraph.
+For the demo user in Guadalajara with preference `prayer`, these commands should return Guadalajara/prayer-related data from the seed graph.
 
-Requirement / rubric:
-FR-14 Recommend Users, FR-15 Recommend Users by Location, FR-25 Local Events, FR-27 Recommend Events.
+Graph idea for event recommendations:
 
-Expected output:
-JSON arrays of recommended users/events or local events. With the demo user in Guadalajara and preference `prayer`, `local_events` and `recommend_events` should return Guadalajara/prayer-related events.
+```text
+User -> interested_in -> Interest -> ~event_topic -> Event
+```
 
-What to say:
-"These recommendations are easier to express as graph traversals than as document queries. The query starts from the session user's Dgraph node and follows interest/location relationships."
+### Step 10 - Dgraph: attend an event
 
-### Step 7 - Show ChromaDB semantic search
+```bash
+python3 main.py attend_event --event_id e1
+python3 main.py graph_summary
+```
 
-Command:
+The first command creates a `User -> attends -> Event` edge. Running `graph_summary` again lets us see attendee counts using the reverse edge `~attends`.
+
+### Step 11 - ChromaDB: semantic search
 
 ```bash
 python3 main.py semantic_search --query "anxiety and peace"
 ```
 
-What this demonstrates:
-Semantic search over embedded content.
+This command searches by meaning. ChromaDB embeds the query and compares it against the stored content embeddings. Results are returned by semantic similarity, not exact keyword matching.
 
-Database used:
-ChromaDB.
+Internal flow:
 
-Requirement / rubric:
-FR-30 Semantic Search, vector embeddings, semantic retrieval.
+```text
+main.py parser
+  -> chroma/client.py
+  -> /chroma/search API route
+  -> ChromaResource
+  -> chroma_model.semantic_search()
+  -> Chroma collection query
+  -> nearest semantic results
+```
 
-Expected output:
-Content related to anxiety, meditation, or peace.
-
-What to say:
-"ChromaDB lets us search by meaning, not only exact keywords."
-
-### Step 8 - Show ChromaDB content recommendation
-
-Command:
+### Step 12 - ChromaDB: recommend content
 
 ```bash
 python3 main.py recommend_content --preferences "prayer meditation"
 ```
 
-What this demonstrates:
-Content recommendation using preferences as the semantic query.
+This uses preferences as a semantic query. Instead of writing a manual filter for every tag, ChromaDB compares the meaning of the preferences against the embedded content.
 
-Database used:
-ChromaDB.
-
-Requirement / rubric:
-FR-24 Recommend Content, vector retrieval.
-
-Expected output:
-Prayer or meditation related content.
-
-What to say:
-"Here the user's preferences become the search query for the vector database."
-
-### Step 9 - Show RAG-style retrieval context
-
-Command:
+### Step 13 - ChromaDB: RAG-style context retrieval
 
 ```bash
 python3 main.py rag_context --query "How can I feel calm when stressed?"
 ```
 
-What this demonstrates:
-The retrieval step of RAG.
+This returns retrieved context that could be passed to an LLM in a full RAG pipeline. The project does not call an LLM here; it implements the retrieval part.
 
-Database used:
-ChromaDB.
+Internal flow:
 
-Requirement / rubric:
-FR-31 RAG Response Generation foundation.
-
-Expected output:
-A `context` field containing relevant retrieved content.
-
-What to say:
-"We are not calling an LLM here, but this is the context that an LLM could use to generate a grounded answer."
-
-### Step 10 - Cassandra status
-
-Command:
-
-```bash
-python3 main.py get-activity_history
+```text
+main.py parser
+  -> chroma/client.py
+  -> /chroma/rag-context API route
+  -> ChromaResource
+  -> chroma_model.rag_context()
+  -> semantic search
+  -> context string + source results
 ```
 
-What this demonstrates:
-This command is present in the parser but currently incomplete.
+## 8. Command Reference
 
-Database used:
-Cassandra, intended but partial.
+### MongoDB commands
 
-Requirement / rubric:
-FR-16/FR-17 activity history are planned for Cassandra but not demo-ready in the current code.
+| Command | Purpose |
+| --- | --- |
+| `register` | Creates a user document in MongoDB. |
+| `login` | Authenticates a user and writes `.session.json`. |
+| `logout` | Removes local session state. |
+| `get_profile` | Reads the logged-in user's MongoDB profile. |
+| `create_note` | Creates a personal note document. |
+| `get_notes` | Reads notes for the logged-in user. |
+| `update_note` | Updates an existing note by id. |
+| `delete_note` | Deletes an existing note by id. |
+| `create_content` | Creates a content document. |
+| `like_content` | Likes an existing content item by id. |
+| `comment_content` | Adds a comment to an existing content item. |
+| `get_comments` | Reads comments for a content item. |
+| `get_own_comments` | Reads comments written by the logged-in user. |
+| `share_content` | Shares content with another user. |
+| `share_content_ext` | Records an external share. |
 
-What to say:
-"Cassandra is designed for the logging/activity part, but this current implementation is partial. We are being honest about what is complete."
+### Dgraph commands
 
-## 8. Requirements / Rubric Mapping
+| Command | Purpose |
+| --- | --- |
+| `dgraph_setup` | Installs the Dgraph schema. |
+| `dgraph_seed` | Loads sample graph data. |
+| `graph_summary` | Shows follower and attendee counts. |
+| `follow_user --user_id <id>` | Creates a user-to-user follow edge. |
+| `recommend_user` | Recommends users by shared interests. |
+| `recommend_user_loc` | Recommends users by location. |
+| `local_events` | Finds future events in the user's city. |
+| `recommend_events` | Recommends events by shared interests. |
+| `attend_event --event_id <id>` | Creates a user-to-event attendance edge. |
 
-| Demo command | Database | Feature | Requirement | Rubric category | Explanation |
+### ChromaDB commands
+
+| Command | Purpose |
+| --- | --- |
+| `chroma_setup` | Creates the ChromaDB collection. |
+| `chroma_seed` | Loads embedded sample content. |
+| `semantic_search --query "..."` | Searches content by semantic meaning. |
+| `recommend_content --preferences "..."` | Recommends content from preferences. |
+| `rag_context --query "..."` | Retrieves context for a future RAG answer. |
+
+## 9. Requirements / Rubric Mapping
+
+| Command | Database | Feature | Requirement covered | Rubric item | Short explanation |
 | --- | --- | --- | --- | --- | --- |
-| `register` | MongoDB | User registration | FR-01 | Document CRUD | Creates a user document in MongoDB. |
-| `login` | MongoDB | User login/session | FR-02 | Functional CLI/API | Authenticates against MongoDB and writes `.session.json`. |
-| `get_profile` | MongoDB | Retrieve profile | FR-03 support | Document retrieval | Shows stored user data. |
-| `create_content` | MongoDB | Create content | FR-06 | Document storage | Stores content document. Test before live demo. |
-| `dgraph_setup` | Dgraph | Install graph schema | Dgraph rubric | Setup script/schema | Defines predicates, indexes, reverse edges. |
-| `dgraph_seed` | Dgraph | Load graph data | Dgraph rubric | Seed/loading script | Creates users, events, interests, and edges. |
-| `graph_summary` | Dgraph | Counts followers/attendees | Dgraph rubric | Reverse traversal + aggregation | Uses `count(~follows)` and `count(~attends)`. |
-| `recommend_user` | Dgraph | User recommendations | FR-14 | Graph traversal | Recommends users by shared interests. |
-| `recommend_user_loc` | Dgraph | Location recommendations | FR-15 | Indexed graph query | Finds users in same location. |
-| `local_events` | Dgraph | Local events | FR-25 | Indexed graph query | Finds future events in same location. |
+| `register` | MongoDB | User registration | FR-01 | Document CRUD | Creates a user document with profile fields. |
+| `login` | MongoDB | User login/session | FR-02 | Functional implementation | Authenticates with MongoDB and writes `.session.json`. |
+| `get_profile` | MongoDB | Read profile | FR-03 support | Document query | Retrieves the current user's document. |
+| `create_note` | MongoDB | Personal notes | FR-21 | Document creation | Stores a nested user note document. |
+| `get_notes` | MongoDB | Retrieve notes | FR-22 | Document query | Reads notes by logged-in user. |
+| `create_content` | MongoDB | Create content | FR-06 | Document creation | Stores content as a MongoDB document. |
+| `dgraph_setup` | Dgraph | Graph schema | Dgraph rubric | Schema, indexes, reverse edges | Defines node predicates, indexes, and reverse traversals. |
+| `dgraph_seed` | Dgraph | Graph seed data | Dgraph rubric | Data loading | Creates users, events, interests, follows, attendance, and topic edges. |
+| `graph_summary` | Dgraph | Counts | Dgraph rubric | Aggregation + reverse traversal | Uses `count(~follows)` and `count(~attends)`. |
+| `recommend_user` | Dgraph | User recommendation | FR-14 | Graph traversal | Finds users connected through shared interests. |
+| `recommend_user_loc` | Dgraph | Location recommendation | FR-15 | Indexed query | Filters users by indexed location. |
+| `local_events` | Dgraph | Local events | FR-25 | Query-driven graph modeling | Finds future events in the user's city. |
 | `attend_event` | Dgraph | Attend event | FR-26 | Relationship mutation | Creates a `User attends Event` edge. |
-| `recommend_events` | Dgraph | Event recommendation | FR-27 | Graph traversal | Recommends events by shared interests. |
-| `chroma_setup` | ChromaDB | Create collection | Vector rubric | Setup script | Creates persistent Chroma collection. |
-| `chroma_seed` | ChromaDB | Load embedded content | Vector rubric | Seed/loading + embeddings | Loads documents and embeddings. |
-| `semantic_search` | ChromaDB | Semantic search | FR-30 | Vector retrieval | Searches content by meaning. |
-| `recommend_content` | ChromaDB | Content recommendation | FR-24 | Vector retrieval | Uses preferences as search query. |
-| `rag_context` | ChromaDB | Retrieval context | FR-31 partial | RAG foundation | Returns context for a future LLM answer, but no LLM generation. |
-| `get-activity_history` | Cassandra | Activity history | FR-16/FR-17 partial | Query-driven design | Parser exists, but runnable integration is incomplete. |
+| `recommend_events` | Dgraph | Event recommendation | FR-27 | Graph traversal | Traverses from user interests to event topics. |
+| `chroma_setup` | ChromaDB | Vector collection | Vector rubric | Setup logic | Creates the persistent Chroma collection. |
+| `chroma_seed` | ChromaDB | Embedded content | Vector rubric | Embeddings + loading | Loads documents and generates embeddings. |
+| `semantic_search` | ChromaDB | Semantic search | FR-30 | Vector retrieval | Searches by meaning instead of exact text. |
+| `recommend_content` | ChromaDB | Content recommendation | FR-24 | Vector retrieval | Uses preferences as a semantic query. |
+| `rag_context` | ChromaDB | Retrieval context | FR-31 partial | RAG foundation | Returns retrieved context, but does not call an LLM. |
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 ### Docker is not running
 
@@ -643,15 +605,13 @@ Symptom:
 Cannot connect to the Docker daemon
 ```
 
-Likely cause:
-Docker Desktop or Docker service is closed.
-
 Fix:
-Open Docker Desktop, then run:
 
 ```bash
 docker compose up -d
 ```
+
+If that fails, open Docker Desktop and try again.
 
 ### MongoDB connection error
 
@@ -661,8 +621,7 @@ Symptom:
 ServerSelectionTimeoutError
 ```
 
-Likely cause:
-MongoDB container is not running or port `27017` is busy.
+Likely cause: MongoDB is not running or port `27017` is already in use.
 
 Fix:
 
@@ -671,92 +630,44 @@ docker compose ps
 docker compose up -d mongodb
 ```
 
-If port is busy, check what is using it:
+Check the port if needed:
 
 ```bash
 lsof -i :27017
 ```
 
-### Dgraph is not responding
+### Email already registered
 
 Symptom:
 
 ```text
-Failed to connect to localhost port 8080
+Email already registered
 ```
 
-Likely cause:
-Dgraph container is not running.
+Fix: use another email or reset MongoDB data:
+
+```bash
+docker compose down -v
+docker compose up -d
+```
+
+Then run setup/seed commands again.
+
+### API server is not running
+
+Symptom: CLI commands fail with connection errors to `localhost:8000`.
 
 Fix:
 
 ```bash
-docker compose up -d dgraph
-curl http://localhost:8080/health
-python3 main.py dgraph_setup
-python3 main.py dgraph_seed
-```
-
-### Dgraph schema not installed
-
-Symptom:
-Dgraph query errors about missing predicates or indexes.
-
-Fix:
-
-```bash
-python3 main.py dgraph_setup
-python3 main.py dgraph_seed
-```
-
-### Empty Dgraph results
-
-Likely cause:
-Seed data was not loaded, the API server is not running, or the logged-in Mongo user was not copied into Dgraph yet.
-
-Fix:
-
-```bash
-python3 main.py dgraph_seed
 uvicorn main:app --reload
-python3 main.py login --email demo@mail.com --password 1234
-python3 main.py graph_summary
 ```
 
-The `graph_summary` command is useful after login because it also checks the session user and makes sure that user exists in Dgraph.
-
-### Chroma collection empty
-
-Symptom:
-Semantic search returns no useful results.
-
-Likely cause:
-Chroma seed was not loaded.
-
-Fix:
+If port `8000` is busy:
 
 ```bash
-python3 main.py chroma_setup
-python3 main.py chroma_seed
-```
-
-### Chroma dependency/model problem
-
-Symptom:
-Import error for `chromadb`, `sentence_transformers`, or model download issue.
-
-Fix:
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-If local Chroma data seems corrupted:
-
-```bash
-rm -rf chroma_db
-python3 main.py chroma_setup
-python3 main.py chroma_seed
+uvicorn main:app --reload --port 8001
+export PROJECT_API_URL=http://localhost:8001
 ```
 
 ### User not logged in
@@ -767,74 +678,127 @@ Symptom:
 Error: User not logged in. Please login first.
 ```
 
-Fix by logging in again:
+Fix:
 
 ```bash
 python3 main.py login --email demo@mail.com --password 1234
 ```
 
-Or register/login with MongoDB:
+If the user does not exist yet:
 
 ```bash
 python3 main.py register --username demo --email demo@mail.com --password 1234 --age 21 --location Guadalajara --preferences prayer
 python3 main.py login --email demo@mail.com --password 1234
 ```
 
-### Stale session JSON file
+### Dgraph is not responding
 
-Symptom:
-Commands run as the wrong user or return empty Dgraph results.
+Symptom: Dgraph setup or query commands cannot connect to `localhost:8080`.
 
 Fix:
 
 ```bash
-rm -f .session.json
+docker compose up -d dgraph
+curl http://localhost:8080/health
+python3 main.py dgraph_setup
+python3 main.py dgraph_seed
+```
+
+### Empty Dgraph results
+
+Likely causes:
+
+- `dgraph_seed` was not run.
+- The API server is not running.
+- The session user has not been copied into Dgraph yet.
+
+Fix:
+
+```bash
+python3 main.py dgraph_seed
 python3 main.py login --email demo@mail.com --password 1234
 python3 main.py graph_summary
 ```
 
-### Port 8000 already in use
+`graph_summary` is a useful check because it also ensures the logged-in Mongo user exists as a Dgraph user.
+
+### ChromaDB returns empty or weak results
+
+Likely cause: Chroma was not seeded or the local Chroma folder is stale.
 
 Fix:
 
 ```bash
-uvicorn main:app --reload --port 8001
-export PROJECT_API_URL=http://localhost:8001
+rm -rf chroma_db
+python3 main.py chroma_setup
+python3 main.py chroma_seed
 ```
 
-### Cassandra command incomplete
+### Chroma dependency/model error
 
-Symptom:
-`get-activity_history` does not execute a real Cassandra query.
-
-Likely cause:
-The parser command exists but is not wired to a function.
+Symptom: errors mentioning `chromadb`, `sentence_transformers`, or model download.
 
 Fix:
-This is a remaining implementation task. Do not rely on it for the main demo.
 
-## 10. Known Limitations
+```bash
+python3 -m pip install -r requirements.txt
+```
 
-- This is a school project, not production-ready software.
-- Some flows use seed/sample data for demo purposes.
-- Error handling is basic and intentionally simple.
-- ChromaDB implements retrieval/context for RAG, not full LLM generation.
-- Cassandra is only partially implemented in the current codebase.
-- Some MongoDB commands depend on existing ObjectIds and should be tested before a live demo.
-- The architecture is intentionally straightforward so we can explain it in class.
+The first Chroma run may download the embedding model, so it can take longer than later runs.
 
-## Team Notes
+## 11. Known Limitations
 
-For the final demo, the safest flow is:
+- This is a school project, not production software.
+- Error handling is basic and kept simple on purpose.
+- Demo data is small and sample-based.
+- ChromaDB implements retrieval/context for RAG, but it does not call an LLM.
+- Cassandra is only partially integrated and is not part of the main runnable demo.
+- Some MongoDB commands require existing ObjectIds, such as liking or commenting on content, so the main demo uses simpler Mongo flows that are easier to run cleanly.
 
-1. Clean reset if needed.
-2. `docker compose up -d`
-3. `python3 main.py dgraph_setup && python3 main.py dgraph_seed`
-4. `python3 main.py chroma_setup && python3 main.py chroma_seed`
-5. `uvicorn main:app --reload`
-6. Register/login the Mongo demo user.
-7. Run `python3 main.py graph_summary` so the Mongo session user is represented in Dgraph.
-8. Demo Dgraph recommendations and local events.
-9. Demo Chroma semantic search/RAG context.
+## 12. Recommended Demo Sequence
 
-If the demo breaks, reset only the part that failed instead of wiping everything immediately.
+For the final demo, this is the safest order:
+
+```bash
+docker compose down -v
+rm -f .session.json
+rm -rf chroma_db
+docker compose up -d
+
+python3 main.py dgraph_setup
+python3 main.py dgraph_seed
+python3 main.py chroma_setup
+python3 main.py chroma_seed
+```
+
+Start the API in one terminal:
+
+```bash
+uvicorn main:app --reload
+```
+
+Run the demo commands in another terminal:
+
+```bash
+python3 main.py register --username demo --email demo@mail.com --password 1234 --age 21 --location Guadalajara --preferences prayer
+python3 main.py login --email demo@mail.com --password 1234
+python3 main.py get_profile
+
+python3 main.py create_note --title "Demo note" --text "This is a personal note saved in MongoDB."
+python3 main.py get_notes
+python3 main.py create_content --title "Peaceful Evening Prayer" --type prayer
+
+python3 main.py graph_summary
+python3 main.py recommend_user
+python3 main.py recommend_user_loc
+python3 main.py local_events
+python3 main.py recommend_events
+python3 main.py attend_event --event_id e1
+python3 main.py graph_summary
+
+python3 main.py semantic_search --query "anxiety and peace"
+python3 main.py recommend_content --preferences "prayer meditation"
+python3 main.py rag_context --query "How can I feel calm when stressed?"
+```
+
+This sequence covers the working MongoDB, Dgraph, and ChromaDB parts without relying on incomplete Cassandra functionality.
