@@ -101,6 +101,32 @@ def seed_graph():
     return {"message": "Dgraph seed data loaded"}
 
 
+def ensure_user_from_session(user):
+    # MongoDB owns the real login user, but Dgraph needs its own User node for graph queries.
+    # This small sync keeps the school demo simple: if the session user is missing in Dgraph,
+    # we create it and connect it to Interest nodes from the user's preferences.
+    user_id = user.get("user_id")
+    if not user_id:
+        raise ValueError("Session user does not have user_id")
+
+    username = user.get("username") or user.get("email") or "session-user"
+    location = user.get("location") or "Guadalajara"
+    preferences = _normalize_preferences(user.get("preferences") or "prayer")
+
+    save_user(user_id, username, location)
+    for preference in preferences:
+        save_interest(preference)
+        if not edge_exists("user_id", user_id, "interested_in", "interest_name", preference):
+            add_edge("user_id", user_id, "interested_in", "interest_name", preference)
+
+    return {
+        "message": "Session user is available in Dgraph",
+        "user_id": user_id,
+        "location": location,
+        "preferences": preferences,
+    }
+
+
 def save_user(user_id, username, location):
     # A User is a node because other nodes connect to it with follows and attends edges.
     uid = _uid_for("user_id", user_id) or f"_:{_blank_name(user_id)}"
@@ -221,16 +247,16 @@ def local_events(user_id):
 
     now = datetime.now(timezone.utc).isoformat()
     query_text = f"""
-{{
-  events(func: type(Event), first: 10) @filter(eq(location, "{_escape(user['location'])}") AND ge(start_date, "{now}")) {{
-    event_id
-    title
-    location
-    start_date
-    attendee_count: count(~attends)
-  }}
-}}
-"""
+    {{
+    events(func: type(Event), first: 10) @filter(eq(location, "{_escape(user['location'])}") AND ge(start_date, "{now}")) {{
+        event_id
+        title
+        location
+        start_date
+        attendee_count: count(~attends)
+    }}
+    }}
+    """
     return _query(query_text).get("events", [])
 
 
@@ -239,23 +265,23 @@ def recommend_events(user_id):
     # We also exclude events the user already attends.
     now = datetime.now(timezone.utc).isoformat()
     query_text = f"""
-{{
-  var(func: eq(user_id, "{_escape(user_id)}")) {{
-    my_events as attends
-    interested_in {{
-      event_candidate as ~event_topic
+    {{
+    var(func: eq(user_id, "{_escape(user_id)}")) {{
+        my_events as attends
+        interested_in {{
+        event_candidate as ~event_topic
+        }}
     }}
-  }}
 
-  events(func: uid(event_candidate), first: 10) @filter(NOT uid(my_events) AND ge(start_date, "{now}")) {{
-    event_id
-    title
-    location
-    start_date
-    attendee_count: count(~attends)
-  }}
-}}
-"""
+    events(func: uid(event_candidate), first: 10) @filter(NOT uid(my_events) AND ge(start_date, "{now}")) {{
+        event_id
+        title
+        location
+        start_date
+        attendee_count: count(~attends)
+    }}
+    }}
+    """
     return _query(query_text).get("events", [])
 
 
@@ -264,48 +290,48 @@ def graph_summary():
     # count(~follows) uses the reverse follows edge to count followers.
     # count(~attends) uses the reverse attends edge to count event attendees.
     query_text = """
-{
-  users(func: type(User), first: 20) {
-    user_id
-    username
-    follower_count: count(~follows)
-  }
+    {
+        users(func: type(User), first: 20) {
+            user_id
+            username
+            follower_count: count(~follows)
+        }
 
-  events(func: type(Event), first: 20) {
-    event_id
-    title
-    attendee_count: count(~attends)
-  }
-}
-"""
+        events(func: type(Event), first: 20) {
+            event_id
+            title
+            attendee_count: count(~attends)
+        }
+    }
+    """
     return _query(query_text)
 
 
 def get_user(user_id):
     query_text = f"""
-{{
-  users(func: eq(user_id, "{_escape(user_id)}"), first: 1) {{
-    uid
-    user_id
-    username
-    location
-  }}
-}}
-"""
+    {{
+    users(func: eq(user_id, "{_escape(user_id)}"), first: 1) {{
+        uid
+        user_id
+        username
+        location
+    }}
+    }}
+    """
     users = _query(query_text).get("users", [])
     return users[0] if users else None
 
 
 def edge_exists(source_predicate, source_id, edge_name, target_predicate, target_id):
     query_text = f"""
-{{
-  nodes(func: eq({source_predicate}, "{_escape(source_id)}"), first: 1) {{
-    {edge_name} @filter(eq({target_predicate}, "{_escape(target_id)}")) {{
-      uid
+    {{
+    nodes(func: eq({source_predicate}, "{_escape(source_id)}"), first: 1) {{
+        {edge_name} @filter(eq({target_predicate}, "{_escape(target_id)}")) {{
+        uid
+        }}
     }}
-  }}
-}}
-"""
+    }}
+    """
     nodes = _query(query_text).get("nodes", [])
     return bool(nodes and nodes[0].get(edge_name))
 
@@ -357,6 +383,14 @@ def _check_response(response):
 
 def _escape(value):
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _normalize_preferences(preferences):
+    if isinstance(preferences, list):
+        values = preferences
+    else:
+        values = str(preferences).replace(",", " ").split()
+    return [value.strip().lower() for value in values if value.strip()]
 
 
 def _blank_name(value):

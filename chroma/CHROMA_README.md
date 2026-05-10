@@ -277,16 +277,3 @@ This ChromaDB implementation covers the vector database rubric:
 - Functional implementation: CLI commands and API endpoints are connected.
 - Clear seed/load logic: `chroma_seed` loads sample content.
 
-## 13. Notes About Simplicity
-
-This is a school-project implementation.
-
-It intentionally avoids:
-
-- external LLM calls
-- paid APIs
-- complex embedding pipelines
-- background jobs
-- production vector-search infrastructure
-
-The goal is to clearly show how ChromaDB stores embeddings and retrieves relevant content by meaning.

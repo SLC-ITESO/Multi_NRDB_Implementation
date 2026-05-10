@@ -135,6 +135,8 @@ python3 main.py dgraph_seed
 
 User commands use the session file, call the API, and then Falcon routes the request.
 
+One important integration detail: login happens in MongoDB, so the session user has a Mongo ObjectId. Before Dgraph user commands run, `dgraph/client.py` makes sure that same session user also exists as a Dgraph `User` node. This avoids the old problem where the session user was something like `6a00ba6fe204703196b479ec`, but the Dgraph seed only had users like `u1`, `u2`, `u3`, and `u4`.
+
 Example:
 
 ```bash
@@ -148,10 +150,11 @@ Terminal
   -> main.py parser
   -> main.py:dgraph_follow_user(args)
   -> dgraph/client.py:follow_user(args)
+  -> dgraph/client.py:ensure_session_user_in_dgraph()
   -> HTTP POST http://localhost:8000/graph/follow
   -> Falcon receives /graph/{action}
   -> dgraph/resources.py:DgraphResource.on_post(action="follow")
-  -> dgraph/dgraph_model.py:follow_user(u1, u4)
+  -> dgraph/dgraph_model.py:follow_user(session user id, u4)
   -> Dgraph POST /mutate
 ```
 
@@ -161,6 +164,7 @@ Key points:
 - Falcon Resource is part of the flow
 - `/graph/{action}` is where the action name is extracted
 - Falcon validates and routes the request
+- the CLI first syncs the logged-in Mongo user into Dgraph using the same `user_id`
 
 User commands:
 
@@ -240,8 +244,10 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 ### User testing flow
 
 ```bash
-# Create a test session
-printf '{"user_id":"u1","username":"mariano"}' > .session.json
+# Register and login through MongoDB
+python3 main.py register --username demo --email demo@mail.com --password 1234 --age 21 --location Guadalajara --preferences prayer
+python3 main.py login --email demo@mail.com --password 1234
+python3 main.py get_profile
 
 # Follow a user
 python3 main.py follow_user --user_id u4
@@ -264,6 +270,8 @@ python3 main.py recommend_events
 # Show graph summary
 python3 main.py graph_summary
 ```
+
+When these commands run, the CLI reads `.session.json`, fetches the user's full Mongo profile when possible, and calls `ensure_user_from_session()` in `dgraph/dgraph_model.py`. That creates or updates a Dgraph user with the same id, location, and preferences.
 
 ## 9. Main Queries
 
@@ -404,9 +412,3 @@ This implementation covers the main Dgraph rubric points:
 - query-driven modeling: the schema is based on the recommendation and event queries
 - working code: CLI commands and API endpoints both call Dgraph correctly
 - setup and seed: `dgraph_setup` and `dgraph_seed`
-
-## 13. Final Note
-
-This version is intentionally simple.
-
-It avoids a complex class-based Dgraph client and uses plain functions instead. That matches the style of the rest of the school project and makes the flow easier to explain in class.

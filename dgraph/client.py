@@ -18,6 +18,40 @@ def get_authenticated_user():
         return json.load(f)
 
 
+def get_session_user_if_present():
+    if not os.path.exists(SESSION_FILE):
+        return None
+    with open(SESSION_FILE, "r") as f:
+        return json.load(f)
+
+
+def ensure_session_user_in_dgraph(user):
+    # The logged-in user comes from MongoDB, but Dgraph has its own graph nodes.
+    # Before graph queries, we copy the session user into Dgraph using the same user_id.
+    full_user = get_full_mongo_user(user)
+    dgraph_model.ensure_user_from_session(full_user)
+    return full_user
+
+
+def get_full_mongo_user(user):
+    # Login currently stores only a small session. This fetch gets location/preferences from Mongo.
+    if user.get("email"):
+        try:
+            response = requests.get(PROJECT_API_URL + "/user", params={"email": user["email"]})
+            if response.ok and response.json():
+                mongo_user = response.json()[0]
+                return {
+                    "user_id": user["user_id"],
+                    "username": mongo_user.get("username", user.get("username")),
+                    "email": user.get("email"),
+                    "location": mongo_user.get("location", "Guadalajara"),
+                    "preferences": mongo_user.get("preferences", "prayer"),
+                }
+        except requests.RequestException:
+            pass
+    return user
+
+
 def dgraph_setup(args):
     # Setup talks directly to Dgraph because it is an admin command, not a normal user action.
     result = dgraph_model.setup_schema()
@@ -34,6 +68,7 @@ def follow_user(args):
     user = get_authenticated_user()
     if not user:
         return
+    ensure_session_user_in_dgraph(user)
 
     payload = {
         "user_id": user["user_id"],
@@ -47,6 +82,7 @@ def recommend_users(args):
     user = get_authenticated_user()
     if not user:
         return
+    ensure_session_user_in_dgraph(user)
 
     response = requests.get(
         PROJECT_API_URL + "/graph/recommend-users",
@@ -59,6 +95,7 @@ def recommend_users_by_location(args):
     user = get_authenticated_user()
     if not user:
         return
+    ensure_session_user_in_dgraph(user)
 
     response = requests.get(
         PROJECT_API_URL + "/graph/recommend-users-by-location",
@@ -71,6 +108,7 @@ def local_events(args):
     user = get_authenticated_user()
     if not user:
         return
+    ensure_session_user_in_dgraph(user)
 
     response = requests.get(
         PROJECT_API_URL + "/graph/local-events",
@@ -83,6 +121,7 @@ def attend_event(args):
     user = get_authenticated_user()
     if not user:
         return
+    ensure_session_user_in_dgraph(user)
 
     payload = {
         "user_id": user["user_id"],
@@ -96,6 +135,7 @@ def recommend_events(args):
     user = get_authenticated_user()
     if not user:
         return
+    ensure_session_user_in_dgraph(user)
 
     response = requests.get(
         PROJECT_API_URL + "/graph/recommend-events",
@@ -105,6 +145,9 @@ def recommend_events(args):
 
 
 def graph_summary(args):
+    user = get_session_user_if_present()
+    if user:
+        ensure_session_user_in_dgraph(user)
     response = requests.get(PROJECT_API_URL + "/graph/summary")
     _print_response(response)
 

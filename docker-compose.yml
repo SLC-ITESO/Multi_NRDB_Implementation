@@ -1,4 +1,12 @@
 services:
+  mongodb:
+    image: mongo:7
+    container_name: final-project-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
   dgraph:
     image: dgraph/standalone:v23.1.1
     container_name: final-project-dgraph
@@ -9,4 +17,5 @@ services:
       - dgraph-data:/dgraph
 
 volumes:
+  mongo-data:
   dgraph-data:
