@@ -9,6 +9,9 @@ import falcon.asgi as falcon
 from pymongo import MongoClient
 import logging
 import argparse
+import sys
+import csv
+import os
 
 from mongo import client as mongo_client_py
 from mongo import resources
@@ -17,11 +20,11 @@ from dgraph import resources as dgraph_resources
 from chroma import client as chroma_client_py
 from chroma import resources as chroma_resources
 
-import app as cassandra_client
+CASSANDRA_DIR = os.path.join(os.path.dirname(__file__), "cassandra")
+if CASSANDRA_DIR not in sys.path:
+    sys.path.insert(0, CASSANDRA_DIR)
 
-import sys
-import csv
-import os
+import fixtures as cassandra_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

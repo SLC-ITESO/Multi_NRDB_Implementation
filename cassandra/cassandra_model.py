@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 import time
 import uuid
 
 log = logging.getLogger(__name__)
 
-DEFAULT_KEYSPACE = "Hallow_db"
+DEFAULT_KEYSPACE = "hallow_db"
 
 CREATE_KEYSPACE = """
     CREATE KEYSPACE IF NOT EXISTS {keyspace}
@@ -142,7 +142,7 @@ def log_activity(
     caller can reuse the data in CLI or API responses.
     """
     activity_id = activity_id or uuid.uuid4()
-    event_time = event_time or datetime.now(datetime.timezone.utc)()
+    event_time = event_time or datetime.now(timezone.utc)
     event_date = event_time.date()
     if metadata is not None and not isinstance(metadata, str):
         metadata = str(metadata)

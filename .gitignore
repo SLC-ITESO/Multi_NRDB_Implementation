@@ -6,3 +6,4 @@ tests/
 
 *.log
 .session.json
+venv
