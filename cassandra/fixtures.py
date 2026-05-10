@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 import logging
 import os
+import time
 import uuid
 
 import cassandra_model as model
@@ -11,7 +12,7 @@ import cassandra_model as model
 
 log = logging.getLogger(__name__)
 
-DEFAULT_CONTACT_POINTS = "localhost,node01"
+DEFAULT_CONTACT_POINTS = "localhost"
 CLUSTER_IPS = [
     host.strip()
     for host in os.getenv("CASSANDRA_CLUSTER_IPS", DEFAULT_CONTACT_POINTS).split(",")
@@ -19,6 +20,8 @@ CLUSTER_IPS = [
 ]
 KEYSPACE = os.getenv("CASSANDRA_KEYSPACE", model.DEFAULT_KEYSPACE).strip().lower()
 REPLICATION_FACTOR = os.getenv("CASSANDRA_REPLICATION_FACTOR", "1")
+CONNECT_RETRIES = int(os.getenv("CASSANDRA_CONNECT_RETRIES", "12"))
+CONNECT_DELAY_SECONDS = int(os.getenv("CASSANDRA_CONNECT_DELAY_SECONDS", "10"))
 
 _cluster = None
 _session = None
@@ -31,7 +34,7 @@ def _get_session():
         return _session
 
     try:
-        from cassandra.cluster import Cluster
+        from cassandra.cluster import Cluster, NoHostAvailable
     except Exception as exc:
         raise RuntimeError(
             "The Cassandra driver could not be initialized in this Python environment. "
@@ -40,12 +43,34 @@ def _get_session():
         ) from exc
 
     _cluster = Cluster(CLUSTER_IPS)
-    session = _cluster.connect()
+    session = _connect_with_retries(_cluster, NoHostAvailable)
     model.create_keyspace(session, keyspace=KEYSPACE, replication_factor=REPLICATION_FACTOR)
     session.set_keyspace(KEYSPACE)
     model.create_schema(session)
     _session = session
     return _session
+
+
+def _connect_with_retries(cluster, no_host_available_error):
+    # Cassandra can be "running" in Docker before it is ready to accept CQL connections.
+    # This waits a bit so demo commands do not fail just because Cassandra is still starting.
+    last_error = None
+    for attempt in range(1, CONNECT_RETRIES + 1):
+        try:
+            return cluster.connect()
+        except no_host_available_error as exc:
+            last_error = exc
+            print(
+                f"Cassandra is not ready yet "
+                f"({attempt}/{CONNECT_RETRIES}). Waiting {CONNECT_DELAY_SECONDS}s..."
+            )
+            if attempt < CONNECT_RETRIES:
+                time.sleep(CONNECT_DELAY_SECONDS)
+
+    raise RuntimeError(
+        "Could not connect to Cassandra. Make sure the cassandra container is running "
+        "and healthy on localhost:9042. Try: docker compose ps cassandra"
+    ) from last_error
 
 
 def _print_activity_list(activities):

@@ -16,6 +16,26 @@ services:
     volumes:
       - dgraph-data:/dgraph
 
+  cassandra:
+    image: cassandra:4.1
+    container_name: final-project-cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: final-project-cluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_RACK: rack1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh 127.0.0.1 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+
 volumes:
   mongo-data:
   dgraph-data:
+  cassandra-data:

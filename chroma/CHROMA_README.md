@@ -1,6 +1,5 @@
 # ChromaDB Part of the Project
 
-This README explains the ChromaDB part of the project in simple English.
 
 The main idea is easy:
 

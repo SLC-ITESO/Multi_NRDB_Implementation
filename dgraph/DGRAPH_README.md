@@ -1,9 +1,5 @@
 # Dgraph Part of the Project
 
-This README explains the Dgraph portion of the project in plain English. The important idea is that there are two different paths:
-
-- admin commands that talk to Dgraph directly
-- user commands that go through Falcon HTTP resources first
 
 ## 1. What Dgraph Is Used For
 
@@ -393,8 +389,6 @@ Step 6: the HTTP response goes back to the CLI
 ```
 
 ## 11. Where to Read First
-
-If you want to understand the Dgraph part quickly, read the files in this order:
 
 1. `dgraph/dgraph_model.py` - the actual Dgraph logic
 2. `dgraph/resources.py` - the Falcon HTTP routing layer
