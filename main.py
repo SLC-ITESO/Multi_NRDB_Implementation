@@ -50,6 +50,7 @@ app.add_route('/user', user_resource)
 app.add_route('/user/{user_id}', user_resource)
 app.add_route('/login', auth_resource)
 app.add_route('/notes', notes_resource)
+app.add_route('/notes/{note_id}', notes_resource)
 app.add_route('/content', content_resource)
 app.add_route('/comment', comment_resource)
 app.add_route('/likes', likes_resource)
@@ -129,6 +130,9 @@ def build_parser():
     usr_share.add_argument('--content_id', "-cid", help='', type=str, required=True)
     usr_share.add_argument('--user_id', "-uid", help='', type=str, required=True)
     usr_share.set_defaults(func=mongo_share_content)
+
+
+    # MAYBE A GET OWN SHARED CONTENT???
 
     # FR-18: External Sharing Tracking  | MUST BE LOGGED IN | CASSANDRA LOGGING
     usr_share_ext = subparsers.add_parser('share_content_ext', help='Share content with a user')

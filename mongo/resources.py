@@ -26,6 +26,8 @@ class UserResource:
             filters['username'] = req.params['username']
         if 'location' in req.params:
             filters['location'] = req.params['location']
+        if 'user_id' in req.params:
+            filters['_id'] = ObjectId(req.params['user_id'])
 
         users_cursor = self.db.users.find(filters)
         users = []
@@ -222,7 +224,7 @@ class NotesResource:
             update_doc['text'] = data['text']
         update_doc['updated_at'] = datetime.now()
             
-        if not update_doc:
+        if len(update_doc) == 1:
             raise falcon.HTTPBadRequest(title='No fields to update')
             
         result = self.db.notesResource.update_one(
@@ -647,15 +649,6 @@ users_types = {
             "content_id": ObjectId,
             "title": str,
             # "liked_at": datetime
-        }
-    ],
-    "recent_comments": [
-        {
-            "comment_id": ObjectId,
-            "content_id": ObjectId,
-            "content_title": str,
-            "comment_preview": str,
-            # "created_at": datetime
         }
     ]
 }
