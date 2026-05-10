@@ -177,14 +177,68 @@ def mongo_create_content(args):
     user = get_authenticated_user()
     if not user:
         return
-    # This might require admin check too? Users should be able to create content
-    print(f"Creating content by {user['user_id']}: {args}")
+    
+    endpoint = PROJECT_API_URL + "/content"
+    
+    content = {
+        "title": args.title,
+        "type": args.type,
+        "created_by": {
+            "user_id": user["user_id"],
+            "username": user["username"]
+        },
+        "likes_count": 0,
+        "comments_count": 0,
+        "shares_count": 0,
+        "recent_likes": [],
+        "recent_comments": []
+    }
+    
+    x = requests.post(endpoint, json=content)
+    
+    if x.ok:
+        print(f"Content '{args.title}' created successfully!")
+    else:
+        print(f"Failed to create content: {x.status_code} - {x.text}")
 
 def mongo_like_content(args):
     user = get_authenticated_user()
     if not user:
         return
-    print(f"Like content by {user['user_id']}: {args}")
+
+    # 1. Fetch content to get title
+    endpoint_content = PROJECT_API_URL + "/content"
+    response = requests.get(endpoint_content, params={"content_id": args.content_id})
+    if not response.ok:
+        print(f"Failed to fetch content: {response.status_code}")
+        return
+
+    contents = response.json()
+    if not contents:
+        print("Content not found.")
+        return
+
+    content = contents[0]
+
+    # 2. Like content
+    endpoint_like = PROJECT_API_URL + "/likes"
+    like_data = {
+        "content": {
+            "content_id": args.content_id,
+            "title": content["title"]
+        },
+        "user": {
+            "user_id": user["user_id"],
+            "username": user["username"]
+        }
+    }
+
+    x = requests.post(endpoint_like, json=like_data)
+
+    if x.ok:
+        print(f"Content '{content['title']}' liked successfully!")
+    else:
+        print(f"Failed to like content: {x.status_code} - {x.text}")
 
 def mongo_comment_content(args):
     user = get_authenticated_user()
@@ -229,7 +283,6 @@ def mongo_get_prof(args):
     if not user:
         return
 
-    # 1. Fetch current preferences
     endpoint = PROJECT_API_URL + "/user"
     response = requests.get(endpoint, params={"email": user['email']})
     if not response.ok:
@@ -243,11 +296,25 @@ def mongo_get_prof(args):
 
     current_user = users[0]
     for key, value in current_user.items():
-        # Make keys prettier
         if key == "password_hash":
             continue
+
         pretty_key = key.replace("_", " ").title()
+        # Handle Lists
         if isinstance(value, list):
-            value = ", ".join(value)
+            if not value:
+                value = "None"
+            # Check if the first item is a dictionary (like preferences or likes)
+            elif isinstance(value[0], dict):
+                # Extract the 'name' or 'title' to make it readable
+                items = []
+                for item in value:
+                    # Use .get() to avoid KeyErrors; fallback to string representation
+                    label = item.get("name") or item.get("title") or str(item)
+                    items.append(label)
+                value = ", ".join(items)
+            else:
+                # It's a normal list of strings/numbers
+                value = ", ".join(map(str, value))
 
         print(f"{pretty_key}: {value}")
