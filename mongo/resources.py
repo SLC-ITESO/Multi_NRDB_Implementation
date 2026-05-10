@@ -14,7 +14,6 @@ handler = logging.FileHandler('multidrdb_mongo.log')
 handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
 log.addHandler(handler)
 
-
 class UserResource:
     def __init__(self, db):
         self.db = db
@@ -27,13 +26,29 @@ class UserResource:
             filters['username'] = req.params['username']
         if 'location' in req.params:
             filters['location'] = req.params['location']
-        
+        if 'user_id' in req.params:
+            filters['_id'] = ObjectId(req.params['user_id'])
+
         users_cursor = self.db.users.find(filters)
         users = []
+
         for user in users_cursor:
+            # Fix top-level ID
             user["_id"] = str(user["_id"])
+
+            # Fix nested IDs in recent_likes
+            if "recent_likes" in user:
+                for like in user["recent_likes"]:
+                    if "content_id" in like:
+                        like["content_id"] = str(like["content_id"])
+
+            # Handle datetimes
+            for field in ["created_at", "updated_at", "last_login"]:
+                if field in user and isinstance(user[field], datetime):
+                    user[field] = user[field].isoformat()
+
             users.append(user)
-        
+
         resp.media = users
         resp.status = falcon.HTTP_200
         log.info("Users retrieved")
@@ -159,6 +174,10 @@ class NotesResource:
             note["_id"] = str(note["_id"])
             if "user" in note and "user_id" in note["user"]:
                 note["user"]["user_id"] = str(note["user"]["user_id"])
+            if "created_at" in note and isinstance(note["created_at"], datetime):
+                note["created_at"] = note["created_at"].isoformat()
+            if "updated_at" in note and isinstance(note["updated_at"], datetime):
+                note["updated_at"] = note["updated_at"].isoformat()
             notes.append(note)
             
         resp.media = notes
@@ -189,6 +208,8 @@ class NotesResource:
         result = self.db.notesResource.insert_one(note)
         note["_id"] = str(result.inserted_id)
         note["user"]["user_id"] = str(note["user"]["user_id"])
+        note["created_at"] = note["created_at"].isoformat()
+        note["updated_at"] = note["updated_at"].isoformat()
         
         resp.media = note
         resp.status = falcon.HTTP_201
@@ -203,7 +224,7 @@ class NotesResource:
             update_doc['text'] = data['text']
         update_doc['updated_at'] = datetime.now()
             
-        if not update_doc:
+        if len(update_doc) == 1:
             raise falcon.HTTPBadRequest(title='No fields to update')
             
         result = self.db.notesResource.update_one(
@@ -234,6 +255,8 @@ class ContentResource:
             filters['type'] = req.params['type']
         if 'user_id' in req.params:
             filters['created_by.user_id'] = ObjectId(req.params['user_id'])
+        if 'content_id' in req.params:
+            filters['_id'] = ObjectId(req.params['content_id'])
         
         contents_cursor = self.db.content.find(filters)
         contents = []
@@ -241,6 +264,8 @@ class ContentResource:
             content["_id"] = str(content["_id"])
             if "created_by" in content and "user_id" in content["created_by"]:
                 content["created_by"]["user_id"] = str(content["created_by"]["user_id"])
+            if "created_at" in content and isinstance(content["created_at"], datetime):
+                content["created_at"] = content["created_at"].isoformat()
             contents.append(content)
             
         resp.media = contents
@@ -269,6 +294,7 @@ class ContentResource:
         result = self.db.content.insert_one(content)
         content["_id"] = str(result.inserted_id)
         content["created_by"]["user_id"] = str(content["created_by"]["user_id"])
+        content["created_at"] = content["created_at"].isoformat()
         
         resp.media = content
         resp.status = falcon.HTTP_201
@@ -322,6 +348,8 @@ class CommentResource:
                 comment["content"]["content_id"] = str(comment["content"]["content_id"])
             if "user" in comment and "user_id" in comment["user"]:
                 comment["user"]["user_id"] = str(comment["user"]["user_id"])
+            if "created_at" in comment and isinstance(comment["created_at"], datetime):
+                comment["created_at"] = comment["created_at"].isoformat()
             comments.append(comment)
             
         resp.media = comments
@@ -356,6 +384,7 @@ class CommentResource:
         comment["_id"] = str(result.inserted_id)
         comment["content"]["content_id"] = str(comment["content"]["content_id"])
         comment["user"]["user_id"] = str(comment["user"]["user_id"])
+        comment["created_at"] = comment["created_at"].isoformat()
         
         resp.media = comment
         resp.status = falcon.HTTP_201
@@ -379,7 +408,7 @@ class ContentLikesResource:
             filters['content.content_id'] = ObjectId(req.params['content_id'])
         if 'user_id' in req.params:
             filters['user.user_id'] = ObjectId(req.params['user_id'])
-            
+
         likes_cursor = self.db.contentLikes.find(filters)
         likes = []
         for like in likes_cursor:
@@ -388,8 +417,10 @@ class ContentLikesResource:
                 like["content"]["content_id"] = str(like["content"]["content_id"])
             if "user" in like and "user_id" in like["user"]:
                 like["user"]["user_id"] = str(like["user"]["user_id"])
+            if "created_at" in like and isinstance(like["created_at"], datetime):
+                like["created_at"] = like["created_at"].isoformat()
             likes.append(like)
-            
+
         resp.media = likes
         resp.status = falcon.HTTP_200
         log.info("Content likes retrieved")
@@ -418,10 +449,29 @@ class ContentLikesResource:
             "created_at": datetime.now()
         }
         result = self.db.contentLikes.insert_one(like)
+
+        # Increment likes_count
+        self.db.content.update_one(
+            {"_id": ObjectId(data["content"]["content_id"])},
+            {"$inc": {"likes_count": 1}}
+        )
+
+        # Update user's recent_likes
+        self.db.users.update_one(
+            {"_id": ObjectId(data["user"]["user_id"])},
+            {"$push": {
+                "recent_likes": {
+                    "$each": [{"content_id": ObjectId(data["content"]["content_id"]), "title": data["content"]["title"]}],
+                    "$slice": -3
+                }
+            }}
+        )
+
         like["_id"] = str(result.inserted_id)
         like["content"]["content_id"] = str(like["content"]["content_id"])
         like["user"]["user_id"] = str(like["user"]["user_id"])
-        
+        like["created_at"] = like["created_at"].isoformat()
+
         resp.media = like
         resp.status = falcon.HTTP_201
         log.info(f"Like created: {like['_id']}")
@@ -454,6 +504,8 @@ class InternalShareResource:
             share["from_user"]["user_id"] = str(share["from_user"]["user_id"])
             share["to_user"]["user_id"] = str(share["to_user"]["user_id"])
             share["content"]["content_id"] = str(share["content"]["content_id"])
+            if "created_at" in share and isinstance(share["created_at"], datetime):
+                share["created_at"] = share["created_at"].isoformat()
             shares.append(share)
 
         resp.media = shares
@@ -494,6 +546,7 @@ class InternalShareResource:
         share["from_user"]["user_id"] = str(share["from_user"]["user_id"])
         share["to_user"]["user_id"] = str(share["to_user"]["user_id"])
         share["content"]["content_id"] = str(share["content"]["content_id"])
+        share["created_at"] = share["created_at"].isoformat()
 
         resp.media = share
         resp.status = falcon.HTTP_201
@@ -518,6 +571,8 @@ class ExternalShareResource:
                 share["user"]["user_id"] = str(share["user"]["user_id"])
             if "content" in share and "content_id" in share["content"]:
                 share["content"]["content_id"] = str(share["content"]["content_id"])
+            if "created_at" in share and isinstance(share["created_at"], datetime):
+                share["created_at"] = share["created_at"].isoformat()
             shares.append(share)
             
         resp.media = shares
@@ -552,6 +607,7 @@ class ExternalShareResource:
         share["_id"] = str(result.inserted_id)
         share["user"]["user_id"] = str(share["user"]["user_id"])
         share["content"]["content_id"] = str(share["content"]["content_id"])
+        share["created_at"] = share["created_at"].isoformat()
         
         resp.media = share
         resp.status = falcon.HTTP_201
@@ -593,15 +649,6 @@ users_types = {
             "content_id": ObjectId,
             "title": str,
             # "liked_at": datetime
-        }
-    ],
-    "recent_comments": [
-        {
-            "comment_id": ObjectId,
-            "content_id": ObjectId,
-            "content_title": str,
-            "comment_preview": str,
-            # "created_at": datetime
         }
     ]
 }

@@ -12,6 +12,10 @@ import argparse
 
 from mongo import client as mongo_client_py
 from mongo import resources
+from dgraph import client as dgraph_client_py
+from dgraph import resources as dgraph_resources
+from chroma import client as chroma_client_py
+from chroma import resources as chroma_resources
 
 import app as cassandra_client
 
@@ -46,17 +50,23 @@ comment_resource = resources.CommentResource(mongo_db)
 likes_resource = resources.ContentLikesResource(mongo_db)
 share_resource = resources.InternalShareResource(mongo_db)
 external_share_resource = resources.ExternalShareResource(mongo_db)
+dgraph_resource = dgraph_resources.DgraphResource()
+chroma_resource = chroma_resources.ChromaResource()
 
     # Add routes to serve the resources
 app.add_route('/user', user_resource)
 app.add_route('/user/{user_id}', user_resource)
 app.add_route('/login', auth_resource)
 app.add_route('/notes', notes_resource)
+app.add_route('/notes/{note_id}', notes_resource)
 app.add_route('/content', content_resource)
 app.add_route('/comment', comment_resource)
 app.add_route('/likes', likes_resource)
 app.add_route('/share', share_resource)
 app.add_route('/external_share', external_share_resource)
+app.add_route('/graph/{action}', dgraph_resource)
+app.add_route('/chroma/{action}', chroma_resource)
+
 
 
 def build_parser():
@@ -96,6 +106,10 @@ def build_parser():
     usr_rem_pref = subparsers.add_parser('rem_pref', help='Remove a preference | MUST BE LOGGED IN')
     usr_rem_pref.set_defaults(func=mongo_rem_pref)
 
+    # get own profile
+    usr_get_profile = subparsers.add_parser('get_profile', help='Get own profile | MUST BE LOGGED IN')
+    usr_get_profile.set_defaults(func=mongo_get_prof)
+
     # FR-06: Create Content | MUST BE LOGGED IN
     cnt_create = subparsers.add_parser('create_content', help='Create content | MUST BE ADMIN')
     cnt_create.add_argument('--title', help='', type=str, required=True)
@@ -128,6 +142,9 @@ def build_parser():
     usr_share.add_argument('--user_id', "-uid", help='', type=str, required=True)
     usr_share.set_defaults(func=mongo_share_content)
 
+
+    # MAYBE A GET OWN SHARED CONTENT???
+
     # FR-18: External Sharing Tracking  | MUST BE LOGGED IN | CASSANDRA LOGGING
     usr_share_ext = subparsers.add_parser('share_content_ext', help='Share content with a user')
     usr_share_ext.add_argument('--content_id', "-cid", help='', type=str, required=True)
@@ -154,24 +171,64 @@ def build_parser():
     usr_delete_note.set_defaults(func=mongo_delete_note)
 
     # DGRAPH
+    dgraph_setup = subparsers.add_parser('dgraph_setup', help='Install the Dgraph schema')
+    dgraph_setup.set_defaults(func=dgraph_setup_schema)
+
+    dgraph_seed = subparsers.add_parser('dgraph_seed', help='Load sample Dgraph users, follows, events, and attendance')
+    dgraph_seed.set_defaults(func=dgraph_seed_graph)
+
     # FR-11: Follow Users
     usr_follow = subparsers.add_parser('follow_user', help='Follow a user')
     usr_follow.add_argument('--user_id', "-uid", help='', type=str, required=True)
+    usr_follow.set_defaults(func=dgraph_follow_user)
+
     # FR-14: Recommend Users | MUST BE LOGGED IN
     usr_recommend = subparsers.add_parser('recommend_user', help='Recommend users to follow | MUST BE LOGGED IN')
+    usr_recommend.set_defaults(func=dgraph_recommend_users)
+
     # FR-15: Recommend Users by Location
     usr_recommend_loc = subparsers.add_parser('recommend_user_loc', help='Recommend users to follow by location | MUST BE LOGGED IN')
+    usr_recommend_loc.set_defaults(func=dgraph_recommend_users_by_location)
+
     # FR-24: Recommend Content
     usr_recommend_content = subparsers.add_parser('recommend_content', help='Recommend content | MUST BE LOGGED IN')
+
     # FR-25: Local Events
     usr_local_events = subparsers.add_parser('local_events', help='Get local events | MUST BE LOGGED IN')
+    usr_local_events.set_defaults(func=dgraph_local_events)
+
     # FR-26: Attend Event
     usr_attend_event = subparsers.add_parser('attend_event', help='Attend an event | MUST BE LOGGED IN')
     usr_attend_event.add_argument('--event_id', "-eid", help='', type=str, required=True)
+    usr_attend_event.set_defaults(func=dgraph_attend_event)
+    
     # FR-27: Recommend Events via connections (Following people?)
     usr_recommend_events = subparsers.add_parser('recommend_events', help='Recommend events | MUST BE LOGGED IN')
+    usr_recommend_events.set_defaults(func=dgraph_recommend_events)
+
+    dgraph_summary = subparsers.add_parser('graph_summary', help='Show Dgraph aggregate counts')
+    dgraph_summary.set_defaults(func=dgraph_graph_summary)
 
     # CHROMADB
+    chroma_setup = subparsers.add_parser('chroma_setup', help='Create the ChromaDB collection')
+    chroma_setup.set_defaults(func=chroma_setup_collection)
+
+    chroma_seed = subparsers.add_parser('chroma_seed', help='Load sample content into ChromaDB')
+    chroma_seed.set_defaults(func=chroma_seed_collection)
+
+    semantic_search = subparsers.add_parser('semantic_search', help='Semantic search over content')
+    semantic_search.add_argument('--query', "-q", help='Search text', type=str, required=True)
+    semantic_search.add_argument('--limit', "-l", help='Number of results', type=int, default=3)
+    semantic_search.set_defaults(func=chroma_semantic_search)
+
+    rag_context = subparsers.add_parser('rag_context', help='Retrieve context for a future RAG answer')
+    rag_context.add_argument('--query', "-q", help='User question', type=str, required=True)
+    rag_context.add_argument('--limit', "-l", help='Number of context items', type=int, default=3)
+    rag_context.set_defaults(func=chroma_rag_context)
+
+    usr_recommend_content.set_defaults(func=chroma_recommend_content)
+    usr_recommend_content.add_argument('--preferences', "-p", help='Preferences if no session preferences exist', type=str)
+    usr_recommend_content.add_argument('--limit', "-l", help='Number of results', type=int, default=3)
 
     # CASSANDRA
     # FR-05: Session Tracking
@@ -261,6 +318,9 @@ def mongo_rem_pref(args):
     print("ENTRO A MONGO_REM_PREF")
     mongo_client_py.mongo_rem_pref(args)
 
+def mongo_get_prof(args):
+    mongo_client_py.mongo_get_prof(args)
+
 def mongo_create_content(args):
     print("ENTRO A MONGO_CREATE_CONTENT")
     mongo_client_py.mongo_create_content(args)
@@ -304,6 +364,48 @@ def mongo_update_note(args):
 def mongo_delete_note(args):
     print("ENTRO A MONGO_DELETE_NOTE")
     mongo_client_py.mongo_delete_note(args)
+
+def dgraph_setup_schema(args):
+    dgraph_client_py.dgraph_setup(args)
+
+def dgraph_seed_graph(args):
+    dgraph_client_py.dgraph_seed(args)
+
+def dgraph_follow_user(args):
+    dgraph_client_py.follow_user(args)
+
+def dgraph_recommend_users(args):
+    dgraph_client_py.recommend_users(args)
+
+def dgraph_recommend_users_by_location(args):
+    dgraph_client_py.recommend_users_by_location(args)
+
+def dgraph_local_events(args):
+    dgraph_client_py.local_events(args)
+
+def dgraph_attend_event(args):
+    dgraph_client_py.attend_event(args)
+
+def dgraph_recommend_events(args):
+    dgraph_client_py.recommend_events(args)
+
+def dgraph_graph_summary(args):
+    dgraph_client_py.graph_summary(args)
+
+def chroma_setup_collection(args):
+    chroma_client_py.chroma_setup(args)
+
+def chroma_seed_collection(args):
+    chroma_client_py.chroma_seed(args)
+
+def chroma_semantic_search(args):
+    chroma_client_py.semantic_search(args)
+
+def chroma_rag_context(args):
+    chroma_client_py.rag_context(args)
+
+def chroma_recommend_content(args):
+    chroma_client_py.recommend_content(args)
 
 if __name__ == "__main__":
 
