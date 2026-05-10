@@ -3,8 +3,6 @@ import requests
 import hashlib
 import json
 
-from dns.dnssec import PRIVATEDNS
-
 PROJECT_API_URL = os.getenv("PROJECT_API_URL", "http://localhost:8000")
 SESSION_FILE = ".session.json"
 
@@ -107,6 +105,19 @@ def mongo_add_pref(args):
     user = get_authenticated_user()
     if not user:
         return
+
+    update_data = {}
+
+    prefs = input("Enter new preferences (comma-separated): ")
+    update_data['preferences'] = [p.strip() for p in prefs.split(',')]
+
+    endpoint = PROJECT_API_URL + f"/user/{user['user_id']}"
+    x = requests.put(endpoint, json=update_data)
+
+    if x.ok:
+        print("User updated successfully!")
+    else:
+        print(f"Update failed: {x.status_code} - {x.text}")
     print(f"Adding pref for user {user['user_id']}: {args}")
 
 def mongo_rem_pref(args):
