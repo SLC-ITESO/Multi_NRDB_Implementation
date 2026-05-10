@@ -1,4 +1,6 @@
 import os
+from traceback import print_tb
+
 import requests
 import hashlib
 import json
@@ -124,7 +126,52 @@ def mongo_rem_pref(args):
     user = get_authenticated_user()
     if not user:
         return
-    print(f"Removing pref for user {user['user_id']}: {args}")
+
+    # 1. Fetch current preferences
+    endpoint = PROJECT_API_URL + "/user"
+    response = requests.get(endpoint, params={"email": user['email']})
+    if not response.ok:
+        print(f"Failed to fetch user profile: {response.status_code}")
+        return
+    
+    users = response.json()
+    if not users:
+        print("User not found.")
+        return
+    
+    current_user = users[0]
+    preferences = current_user.get("preferences", [])
+    
+    if not preferences:
+        print("No preferences to remove.")
+        return
+    
+    # 2. List preferences
+    print("--- Current Preferences ---")
+    for i, pref in enumerate(preferences):
+        print(f"{i + 1}. {pref}")
+    
+    # 3. Prompt for removal
+    try:
+        choice = int(input("Enter the number of the preference to remove: "))
+        if choice < 1 or choice > len(preferences):
+            print("Invalid choice.")
+            return
+        
+        # 4. Remove and update
+        removed_pref = preferences.pop(choice - 1)
+        
+        endpoint = PROJECT_API_URL + f"/user/{user['user_id']}"
+        update_data = {"preferences": preferences}
+        x = requests.put(endpoint, json=update_data)
+        
+        if x.ok:
+            print(f"Preference '{removed_pref}' removed successfully!")
+        else:
+            print(f"Update failed: {x.status_code} - {x.text}")
+            
+    except ValueError:
+        print("Invalid input. Please enter a number.")
 
 def mongo_create_content(args):
     user = get_authenticated_user()
@@ -176,3 +223,31 @@ def mongo_update_note(args):
 def mongo_delete_note(args):
     print(args)
     return None
+
+def mongo_get_prof(args):
+    user = get_authenticated_user()
+    if not user:
+        return
+
+    # 1. Fetch current preferences
+    endpoint = PROJECT_API_URL + "/user"
+    response = requests.get(endpoint, params={"email": user['email']})
+    if not response.ok:
+        print(f"Failed to fetch user profile: {response.status_code}")
+        return
+
+    users = response.json()
+    if not users:
+        print("User not found.")
+        return
+
+    current_user = users[0]
+    for key, value in current_user.items():
+        # Make keys prettier
+        if key == "password_hash":
+            continue
+        pretty_key = key.replace("_", " ").title()
+        if isinstance(value, list):
+            value = ", ".join(value)
+
+        print(f"{pretty_key}: {value}")

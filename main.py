@@ -94,6 +94,10 @@ def build_parser():
     usr_rem_pref = subparsers.add_parser('rem_pref', help='Remove a preference | MUST BE LOGGED IN')
     usr_rem_pref.set_defaults(func=mongo_rem_pref)
 
+    # get own profile
+    usr_get_profile = subparsers.add_parser('get_profile', help='Get own profile | MUST BE LOGGED IN')
+    usr_get_profile.set_defaults(func=mongo_get_prof)
+
     # FR-06: Create Content | MUST BE LOGGED IN
     cnt_create = subparsers.add_parser('create_content', help='Create content | MUST BE ADMIN')
     cnt_create.add_argument('--title', help='', type=str, required=True)
@@ -205,6 +209,9 @@ def mongo_add_pref(args):
 def mongo_rem_pref(args):
     print("ENTRO A MONGO_REM_PREF")
     mongo_client_py.mongo_rem_pref(args)
+
+def mongo_get_prof(args):
+    mongo_client_py.mongo_get_prof(args)
 
 def mongo_create_content(args):
     print("ENTRO A MONGO_CREATE_CONTENT")

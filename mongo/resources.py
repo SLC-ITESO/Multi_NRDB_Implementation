@@ -32,6 +32,10 @@ class UserResource:
         users = []
         for user in users_cursor:
             user["_id"] = str(user["_id"])
+            if "created_at" in user and isinstance(user["created_at"], datetime):
+                user["created_at"] = user["created_at"].isoformat()
+            if "updated_at" in user and isinstance(user["updated_at"], datetime):
+                user["updated_at"] = user["updated_at"].isoformat()
             users.append(user)
         
         resp.media = users
