@@ -13,6 +13,8 @@ import argparse
 from mongo import client as mongo_client_py
 from mongo import resources
 
+import app as cassandra_client
+
 import sys
 import csv
 import os
@@ -172,14 +174,67 @@ def build_parser():
     # CHROMADB
 
     # CASSANDRA
-    # FR-16: Retrieve Activity History | MUST BE LOGGED IN
-    # FR-17: Filter Activity History
-    usr_activity = subparsers.add_parser('get-activity_history', help='Retrieve activity history | MUST BE LOGGED IN')
-    usr_activity.add_argument('--like', "-l", help='Gets liked content', type=str)
-    usr_activity.add_argument('--date', "-d", help='Gets accesed in a certain date', type=str)
+    # FR-05: Session Tracking
+    p = subparsers.add_parser('log_session',
+                              help='Log a login or logout event (FR-05)')
+    p.add_argument('--user_id',    required=True)
+    p.add_argument('--event_type', required=True, choices=['login', 'logout'])
+    p.set_defaults(func=cassandra_client.log_session)
 
-    # FR-19: Activity Logging
+    # FR-07 / FR-08 / FR-13 / FR-18 / FR-19: Generic activity log
+    p = subparsers.add_parser('log_activity',
+                              help='Log a user activity event (FR-07, FR-08, FR-13, FR-18, FR-19)')
+    p.add_argument('--user_id',       required=True)
+    p.add_argument('--activity_type', required=True,
+                   choices=['like', 'comment', 'share_internal',
+                            'share_external', 'view', 'note'])
+    p.add_argument('--content_id', '-cid', required=False, default=None)
+    p.add_argument('--metadata',           required=False, default=None)
+    p.set_defaults(func=cassandra_client.log_activity)
+
+    # FR-16: Retrieve Activity History
+    p = subparsers.add_parser('get_activity_history',
+                              help='Retrieve activity history for a user (FR-16)')
+    p.add_argument('--user_id', required=True)
+    p.add_argument('--limit',   type=int, default=20)
+    p.set_defaults(func=cassandra_client.get_activity_history)
+ 
+    # FR-17: Filter Activity History
+    p = subparsers.add_parser('filter_activity',
+                              help='Filter activity history by type and/or date (FR-17)')
+    p.add_argument('--user_id',       required=True)
+    p.add_argument('--activity_type', required=False, default=None,
+                   choices=['login', 'logout', 'like', 'comment',
+                            'share_internal', 'share_external', 'view', 'note'])
+    p.add_argument('--date',  required=False, default=None, help='YYYY-MM-DD')
+    p.add_argument('--limit', type=int, default=20)
+    p.set_defaults(func=cassandra_client.filter_activity)
+ 
     # FR-20: Daily Active Users
+    p = subparsers.add_parser('get_daily_active_users',
+                              help='Count unique active users on a given date (FR-20)')
+    p.add_argument('--date', required=True, help='YYYY-MM-DD')
+    p.set_defaults(func=cassandra_client.get_daily_active_users)
+ 
+    # FR-32: Content Engagement Metrics
+    p = subparsers.add_parser('get_content_metrics',
+                              help='Get engagement metrics for a content item (FR-32)')
+    p.add_argument('--content_id', '-cid', required=True)
+    p.set_defaults(func=cassandra_client.get_content_metrics)
+ 
+    # FR-33: System-wide Stats
+    p = subparsers.add_parser('get_system_stats',
+                              help='Get system-wide statistics for a given date (FR-33)')
+    p.add_argument('--date', required=True, help='YYYY-MM-DD')
+    p.set_defaults(func=cassandra_client.get_system_stats)
+ 
+    # FR-34: Trending Content
+    p = subparsers.add_parser('trending_content',
+                              help='Identify trending content by interaction volume (FR-34)')
+    p.add_argument('--date',  required=True, help='YYYY-MM-DD')
+    p.add_argument('--limit', type=int, default=10)
+    p.set_defaults(func=cassandra_client.trending_content)
+
     return parser
 
 def mongo_register(args):
@@ -254,4 +309,6 @@ if __name__ == "__main__":
 
     parser = build_parser()
     args = parser.parse_args()
+    if not hasattr(args, "func"):
+        parser.error(f"Command '{args.command}' is not implemented yet.")
     args.func(args)
