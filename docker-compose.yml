@@ -1,0 +1,12 @@
+services:
+  dgraph:
+    image: dgraph/standalone:v23.1.1
+    container_name: final-project-dgraph
+    ports:
+      - "8080:8080"
+      - "9080:9080"
+    volumes:
+      - dgraph-data:/dgraph
+
+volumes:
+  dgraph-data:

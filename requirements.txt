@@ -3,3 +3,4 @@ pymongo
 uvicorn
 requests
 chromadb
+sentence-transformers
