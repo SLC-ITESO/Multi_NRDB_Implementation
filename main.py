@@ -173,6 +173,9 @@ def build_parser():
     usr_delete_note.add_argument('--note_id', "-nid", help='', type=str, required=True)
     usr_delete_note.set_defaults(func=mongo_delete_note)
 
+    # Add data
+    add_data = subparsers.add_parser('add_data', help='Add data to the database')
+    add_data.set_defaults(func=populate_dbs)
     # DGRAPH
     dgraph_setup = subparsers.add_parser('dgraph_setup', help='Install the Dgraph schema')
     dgraph_setup.set_defaults(func=dgraph_setup_schema)
@@ -204,7 +207,7 @@ def build_parser():
     usr_attend_event = subparsers.add_parser('attend_event', help='Attend an event | MUST BE LOGGED IN')
     usr_attend_event.add_argument('--event_id', "-eid", help='', type=str, required=True)
     usr_attend_event.set_defaults(func=dgraph_attend_event)
-    
+
     # FR-27: Recommend Events via connections (Following people?)
     usr_recommend_events = subparsers.add_parser('recommend_events', help='Recommend events | MUST BE LOGGED IN')
     usr_recommend_events.set_defaults(func=dgraph_recommend_events)
@@ -258,7 +261,7 @@ def build_parser():
     p.add_argument('--user_id', required=True)
     p.add_argument('--limit',   type=int, default=20)
     p.set_defaults(func=cassandra_client.get_activity_history)
- 
+
     # FR-17: Filter Activity History
     p = subparsers.add_parser('filter_activity',
                               help='Filter activity history by type and/or date (FR-17)')
@@ -269,25 +272,25 @@ def build_parser():
     p.add_argument('--date',  required=False, default=None, help='YYYY-MM-DD')
     p.add_argument('--limit', type=int, default=20)
     p.set_defaults(func=cassandra_client.filter_activity)
- 
+
     # FR-20: Daily Active Users
     p = subparsers.add_parser('get_daily_active_users',
                               help='Count unique active users on a given date (FR-20)')
     p.add_argument('--date', required=True, help='YYYY-MM-DD')
     p.set_defaults(func=cassandra_client.get_daily_active_users)
- 
+
     # FR-32: Content Engagement Metrics
     p = subparsers.add_parser('get_content_metrics',
                               help='Get engagement metrics for a content item (FR-32)')
     p.add_argument('--content_id', '-cid', required=True)
     p.set_defaults(func=cassandra_client.get_content_metrics)
- 
+
     # FR-33: System-wide Stats
     p = subparsers.add_parser('get_system_stats',
                               help='Get system-wide statistics for a given date (FR-33)')
     p.add_argument('--date', required=True, help='YYYY-MM-DD')
     p.set_defaults(func=cassandra_client.get_system_stats)
- 
+
     # FR-34: Trending Content
     p = subparsers.add_parser('trending_content',
                               help='Identify trending content by interaction volume (FR-34)')
@@ -298,73 +301,73 @@ def build_parser():
     return parser
 
 def mongo_register(args):
-    print("ENTRO A MONGO_REGISTER")
+    # print("ENTRO A MONGO_REGISTER")
     mongo_client_py.mongo_register(args)
 
 def mongo_login(args):
-    print("ENTRO A MONGO_LOGIN")
+    # print("ENTRO A MONGO_LOGIN")
     mongo_client_py.mongo_login(args)
 
 def mongo_logoff(args):
     mongo_client_py.mongo_logout()
 
 def mongo_update(args):
-    print("ENTRO A MONGO_UPDATE")
+   # print("ENTRO A MONGO_UPDATE")
     mongo_client_py.mongo_update(args)
 
 def mongo_add_pref(args):
-    print("ENTRO A MONGO_ADD_PREF")
+    #print("ENTRO A MONGO_ADD_PREF")
     mongo_client_py.mongo_add_pref(args)
 
 def mongo_rem_pref(args):
-    print("ENTRO A MONGO_REM_PREF")
+    #print("ENTRO A MONGO_REM_PREF")
     mongo_client_py.mongo_rem_pref(args)
 
 def mongo_get_prof(args):
     mongo_client_py.mongo_get_prof(args)
 
 def mongo_create_content(args):
-    print("ENTRO A MONGO_CREATE_CONTENT")
+    #print("ENTRO A MONGO_CREATE_CONTENT")
     mongo_client_py.mongo_create_content(args)
 
 def mongo_like_content(args):
-    print("ENTRO A MONGO_LIKE_CONTENT")
+    #print("ENTRO A MONGO_LIKE_CONTENT")
     mongo_client_py.mongo_like_content(args)
 
 def mongo_comment_content(args):
-    print("ENTRO A MONGO_COMMENT_CONTENT")
+    #print("ENTRO A MONGO_COMMENT_CONTENT")
     mongo_client_py.mongo_comment_content(args)
 
 def mongo_get_comments(args):
-    print("ENTRO A MONGO_GET_COMMENTS")
+    #print("ENTRO A MONGO_GET_COMMENTS")
     mongo_client_py.mongo_get_comments(args)
 
 def mongo_get_own_comments(args):
-    print("ENTRO A MONGO_GET_OWN_COMMENTS")
+    #print("ENTRO A MONGO_GET_OWN_COMMENTS")
     mongo_client_py.mongo_get_own_comments(args)
 
 def mongo_share_content(args):
-    print("ENTRO A MONGO_SHARE_CONTENT")
+    #print("ENTRO A MONGO_SHARE_CONTENT")
     mongo_client_py.mongo_share_content(args)
 
 def mongo_share_content_ext(args):
-    print("ENTRO A MONGO_SHARE_CONTENT_EXT")
+    #print("ENTRO A MONGO_SHARE_CONTENT_EXT")
     mongo_client_py.mongo_share_content_ext(args)
 
 def mongo_create_note(args):
-    print("ENTRO A MONGO_CREATE_NOTE")
+    #print("ENTRO A MONGO_CREATE_NOTE")
     mongo_client_py.mongo_create_note(args)
 
 def mongo_get_notes(args):
-    print("ENTRO A MONGO_GET_NOTES")
+    #print("ENTRO A MONGO_GET_NOTES")
     mongo_client_py.mongo_get_notes(args)
 
 def mongo_update_note(args):
-    print("ENTRO A MONGO_UPDATE_NOTE")
+    #print("ENTRO A MONGO_UPDATE_NOTE")
     mongo_client_py.mongo_update_note(args)
 
 def mongo_delete_note(args):
-    print("ENTRO A MONGO_DELETE_NOTE")
+    #print("ENTRO A MONGO_DELETE_NOTE")
     mongo_client_py.mongo_delete_note(args)
 
 def dgraph_setup_schema(args):
@@ -408,6 +411,39 @@ def chroma_rag_context(args):
 
 def chroma_recommend_content(args):
     chroma_client_py.recommend_content(args)
+
+def populate_dbs(args):
+    # MONGODB
+    print("Populating MongoDB with data...")
+
+    # Registers two users
+    users = [
+        {"username": "FatherJohn", "email": "father@church.org", "password": "pass", "age": 50, "location": "Vatican", "preferences": "prayer,bible"},
+        {"username": "SisterMary", "email": "sister@church.org", "password": "pass", "age": 40, "location": "Dublin", "preferences": "meditation,service"}
+    ]
+
+    for user in users:
+        print(f"Registering user: {user['username']}")
+        # Create a mock args namespace
+        mock_args = argparse.Namespace(**user)
+        mongo_client_py.mongo_register(mock_args)
+
+    # Login and create content as FatherJohn
+    print("Logging in FatherJohn...")
+    login_args = argparse.Namespace(email="father@church.org", password="pass")
+    mongo_client_py.mongo_login(login_args)
+
+    print("Creating content...")
+    content = [
+        {"title": "The Beatitudes", "type": "text"},
+        {"title": "Morning Prayer", "type": "audio"}
+    ]
+    for c in content:
+        mock_args = argparse.Namespace(**c)
+        mongo_client_py.mongo_create_content(mock_args)
+
+    mongo_logoff(args)
+
 
 if __name__ == "__main__":
 
