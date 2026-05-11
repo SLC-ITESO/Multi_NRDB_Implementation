@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import logging
 import os
 import time
@@ -12,7 +13,9 @@ import cassandra_model as model
 
 log = logging.getLogger(__name__)
 
-DEFAULT_CONTACT_POINTS = "localhost"
+DEFAULT_CONTACT_POINTS = "localhost,node01"
+USER_ID_NAMESPACE = uuid.UUID("5d9a7c90-224a-4d49-a89e-56f4ef8d6f1a")
+CONTENT_ID_NAMESPACE = uuid.UUID("7e24db34-719a-4543-96a7-f9c0f493b8ae")
 CLUSTER_IPS = [
     host.strip()
     for host in os.getenv("CASSANDRA_CLUSTER_IPS", DEFAULT_CONTACT_POINTS).split(",")
@@ -25,6 +28,23 @@ CONNECT_DELAY_SECONDS = int(os.getenv("CASSANDRA_CONNECT_DELAY_SECONDS", "10"))
 
 _cluster = None
 _session = None
+
+
+def _normalize_identifier(raw_identifier, namespace):
+    reference = str(raw_identifier).strip()
+    if not reference:
+        raise ValueError("identifier cannot be empty")
+
+    try:
+        return uuid.UUID(reference), reference
+    except ValueError:
+        return uuid.uuid5(namespace, reference), reference
+
+
+def _serialize_metadata(metadata):
+    if metadata is None or isinstance(metadata, str):
+        return metadata
+    return json.dumps(metadata, sort_keys=True)
 
 
 def _get_session():
@@ -83,13 +103,13 @@ def _print_activity_list(activities):
     for activity in activities:
         print(f"  {'Timestamp':20}{activity['timestamp']}")
         print(f"  {'Type':20}{activity['activity_type']}")
-        print(f"  {'Content ID':20}{activity['content_id'] or '-'}")
+        print(f"  {'Content ID':20}{activity['content_ref'] or activity['content_id'] or '-'}")
         print(f"  {'Metadata':20}{activity['metadata'] or '-'}")
         print(separator)
 
 
 def _print_content_metrics(metrics):
-    print(f"\nEngagement metrics for content: {metrics['content_id']}")
+    print(f"\nEngagement metrics for content: {metrics.get('content_ref') or metrics['content_id']}")
     print(f"  {'Total interactions':30}{metrics['total_interactions']}")
     print("  Breakdown by type:")
     for activity_type, count in metrics["by_type"].items():
@@ -118,17 +138,48 @@ def _print_trending(results, query_date):
         return
 
     for rank, item in enumerate(results, start=1):
+        content_display = item.get("content_ref") or str(item["content_id"])
         print(
-            f"  #{rank:<4}{str(item['content_id']):<40}"
+            f"  #{rank:<4}{content_display:<40}"
             f"interactions: {item['interaction_count']}"
         )
     print(separator)
 
 
-def log_session(args):
+def log_session_event(user_id, event_type, metadata=None):
     session = _get_session()
-    user_id = uuid.UUID(args.user_id)
-    result = model.log_activity(session, user_id, activity_type=args.event_type)
+    normalized_user_id, user_ref = _normalize_identifier(user_id, USER_ID_NAMESPACE)
+    return model.log_activity(
+        session,
+        normalized_user_id,
+        activity_type=event_type,
+        user_ref=user_ref,
+        metadata=_serialize_metadata(metadata),
+    )
+
+
+def log_activity_event(user_id, activity_type, content_id=None, metadata=None):
+    session = _get_session()
+    normalized_user_id, user_ref = _normalize_identifier(user_id, USER_ID_NAMESPACE)
+    normalized_content_id = None
+    content_ref = None
+
+    if content_id is not None:
+        normalized_content_id, content_ref = _normalize_identifier(content_id, CONTENT_ID_NAMESPACE)
+
+    return model.log_activity(
+        session,
+        normalized_user_id,
+        activity_type=activity_type,
+        content_id=normalized_content_id,
+        user_ref=user_ref,
+        content_ref=content_ref,
+        metadata=_serialize_metadata(metadata),
+    )
+
+
+def log_session(args):
+    result = log_session_event(args.user_id, args.event_type)
     print(
         f"Session event '{result['activity_type']}' logged "
         f"[activity_id={result['activity_id']}]."
@@ -136,14 +187,10 @@ def log_session(args):
 
 
 def log_activity(args):
-    session = _get_session()
-    user_id = uuid.UUID(args.user_id)
-    content_id = uuid.UUID(args.content_id) if args.content_id else None
-    result = model.log_activity(
-        session,
-        user_id,
-        activity_type=args.activity_type,
-        content_id=content_id,
+    result = log_activity_event(
+        args.user_id,
+        args.activity_type,
+        content_id=args.content_id,
         metadata=args.metadata,
     )
     print(
@@ -154,7 +201,7 @@ def log_activity(args):
 
 def get_activity_history(args):
     session = _get_session()
-    user_id = uuid.UUID(args.user_id)
+    user_id, _ = _normalize_identifier(args.user_id, USER_ID_NAMESPACE)
     activities = model.get_activity_history(session, user_id, limit=args.limit)
     print(f"\nActivity history for user: {args.user_id} ({len(activities)} events)")
     _print_activity_list(activities)
@@ -162,7 +209,7 @@ def get_activity_history(args):
 
 def filter_activity(args):
     session = _get_session()
-    user_id = uuid.UUID(args.user_id)
+    user_id, _ = _normalize_identifier(args.user_id, USER_ID_NAMESPACE)
     activity_date = datetime.fromisoformat(args.date).date() if args.date else None
     activities = model.filter_activity_history(
         session,
@@ -188,8 +235,10 @@ def get_daily_active_users(args):
 
 def get_content_metrics(args):
     session = _get_session()
-    content_id = uuid.UUID(args.content_id)
+    content_id, content_ref = _normalize_identifier(args.content_id, CONTENT_ID_NAMESPACE)
     metrics = model.get_content_metrics(session, content_id)
+    if metrics.get("content_ref") is None:
+        metrics["content_ref"] = content_ref
     _print_content_metrics(metrics)
 
 

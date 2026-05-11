@@ -189,6 +189,17 @@ When a Cassandra command runs:
 5. The event is inserted or the query is executed.
 6. The result is printed in the terminal.
 
+There is also an automatic integration path now:
+
+```text
+Mongo CLI action
+  -> mongo/client.py
+  -> Mongo/Falcon API request succeeds
+  -> Cassandra event is logged automatically
+```
+
+That means actions such as login, logout, like, comment, share, and note creation now populate Cassandra without needing a separate manual `log_activity` command.
+
 ## 8. Available Commands
 
 ### Log login or logout
@@ -253,6 +264,14 @@ The Cassandra integration was tested successfully with Python `3.11` using the C
 
 The smoke test covered:
 
+- Mongo-driven automatic logging for:
+  - `login`
+  - `logout`
+  - `like_content`
+  - `comment_content`
+  - `share_content`
+  - `share_content_ext`
+  - `create_note`
 - logging a `login` event
 - logging `like` and `comment` events with a `content_id`
 - retrieving full activity history
@@ -264,10 +283,11 @@ The smoke test covered:
 
 Observed successful results included:
 
-- 3 events written for one test user
-- 1 daily active user for the test date
-- 2 interactions counted for the test content
+- 7 automatic events written for one Mongo user in one smoke run
+- correct activity history for `login`, `like`, `comment`, `share_internal`, `share_external`, `note`, and `logout`
+- 4 interactions counted for the test content
 - correct trending ranking for the test content
+- end-to-end verification that Mongo actions generated Cassandra analytics automatically
 
 ## 10. Important Implementation Notes
 
@@ -292,12 +312,16 @@ That is useful because:
 
 ### UUIDs
 
-The current Cassandra commands expect:
+The Cassandra tables still use UUID partition keys internally, but the CLI now accepts regular Mongo ObjectId strings too.
 
-- `user_id` as a UUID
-- `content_id` as a UUID when provided
+That means you can run commands like:
 
-So if MongoDB content or user ids are still ObjectIds in other parts of the project, you should not pass those directly into the Cassandra CLI commands unless you add a conversion or a separate mapping strategy.
+```bash
+python main.py get_activity_history --user_id 6a013ffaddd1aecef4e360f7 --limit 20
+python main.py get_content_metrics --content_id 6a014002ddd1aecef4e360f9
+```
+
+The Cassandra fixture layer deterministically maps those Mongo ids to internal UUID keys and also stores the original ids as readable references, so output and analytics stay understandable.
 
 ## 11. Troubleshooting
 

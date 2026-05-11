@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime
 import logging
 import time
 import uuid
@@ -20,10 +20,12 @@ CREATE_KEYSPACE = """
 CREATE_ACTIVITY_BY_USER = """
     CREATE TABLE IF NOT EXISTS activity_by_user (
         user_id       uuid,
+        user_ref      text,
         timestamp     timestamp,
         activity_id   uuid,
         activity_type text,
         content_id    uuid,
+        content_ref   text,
         metadata      text,
         PRIMARY KEY ((user_id), timestamp, activity_id)
     ) WITH CLUSTERING ORDER BY (timestamp DESC);
@@ -36,8 +38,10 @@ CREATE_ACTIVITY_BY_DAY = """
         timestamp     timestamp,
         activity_id   uuid,
         user_id       uuid,
+        user_ref      text,
         activity_type text,
         content_id    uuid,
+        content_ref   text,
         PRIMARY KEY ((date), timestamp, activity_id)
     ) WITH CLUSTERING ORDER BY (timestamp DESC);
 """
@@ -46,14 +50,31 @@ CREATE_ACTIVITY_BY_DAY = """
 CREATE_ACTIVITY_BY_CONTENT = """
     CREATE TABLE IF NOT EXISTS activity_by_content (
         content_id    uuid,
+        content_ref   text,
         timestamp     timestamp,
         activity_id   uuid,
         user_id       uuid,
+        user_ref      text,
         activity_type text,
         metadata      text,
         PRIMARY KEY ((content_id), timestamp, activity_id)
     ) WITH CLUSTERING ORDER BY (timestamp DESC);
 """
+
+REFERENCE_COLUMNS = {
+    "activity_by_user": {
+        "user_ref": "text",
+        "content_ref": "text",
+    },
+    "activity_by_day": {
+        "user_ref": "text",
+        "content_ref": "text",
+    },
+    "activity_by_content": {
+        "content_ref": "text",
+        "user_ref": "text",
+    },
+}
 
 
 def _new_batch_statement():
@@ -80,12 +101,16 @@ def _normalize_limit(limit, default=20):
 
 def _row_to_activity(row):
     return {
-        "user_id": row.user_id,
+        "user_id": getattr(row, "user_ref", None) or row.user_id,
+        "user_key": row.user_id,
         "timestamp": row.timestamp,
         "date": row.timestamp.date() if getattr(row, "timestamp", None) else None,
         "activity_id": row.activity_id,
         "activity_type": row.activity_type,
-        "content_id": getattr(row, "content_id", None),
+        "content_id": getattr(row, "content_ref", None) or getattr(row, "content_id", None),
+        "content_key": getattr(row, "content_id", None),
+        "user_ref": getattr(row, "user_ref", None),
+        "content_ref": getattr(row, "content_ref", None),
         "metadata": getattr(row, "metadata", None),
     }
 
@@ -124,6 +149,31 @@ def create_schema(session):
         CREATE_ACTIVITY_BY_CONTENT,
     ):
         execute_with_retries(session, statement)
+    _ensure_reference_columns(session)
+
+
+def _get_table_columns(session, table_name):
+    keyspace = session.keyspace or DEFAULT_KEYSPACE
+    rows = session.execute(
+        """
+        SELECT column_name
+        FROM system_schema.columns
+        WHERE keyspace_name = %s AND table_name = %s
+        """,
+        (keyspace, table_name),
+    )
+    return {row.column_name for row in rows}
+
+
+def _ensure_reference_columns(session):
+    for table_name, columns in REFERENCE_COLUMNS.items():
+        existing_columns = _get_table_columns(session, table_name)
+        for column_name, column_type in columns.items():
+            if column_name not in existing_columns:
+                execute_with_retries(
+                    session,
+                    f"ALTER TABLE {table_name} ADD {column_name} {column_type}",
+                )
 
 
 def log_activity(
@@ -131,6 +181,8 @@ def log_activity(
     user_id,
     activity_type,
     content_id=None,
+    user_ref=None,
+    content_ref=None,
     metadata=None,
     event_time=None,
     activity_id=None,
@@ -142,34 +194,36 @@ def log_activity(
     caller can reuse the data in CLI or API responses.
     """
     activity_id = activity_id or uuid.uuid4()
-    event_time = event_time or datetime.now(timezone.utc)
+    event_time = event_time or datetime.now().astimezone()
     event_date = event_time.date()
+    user_ref = user_ref or str(user_id)
+    content_ref = content_ref or (str(content_id) if content_id is not None else None)
     if metadata is not None and not isinstance(metadata, str):
         metadata = str(metadata)
 
     insert_by_user = session.prepare(
         """
         INSERT INTO activity_by_user
-            (user_id, timestamp, activity_id, activity_type, content_id, metadata)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (user_id, user_ref, timestamp, activity_id, activity_type, content_id, content_ref, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
     insert_by_day = session.prepare(
         """
         INSERT INTO activity_by_day
-            (date, timestamp, activity_id, user_id, activity_type, content_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+            (date, timestamp, activity_id, user_id, user_ref, activity_type, content_id, content_ref)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """
     )
 
     batch = _new_batch_statement()
     batch.add(
         insert_by_user,
-        (user_id, event_time, activity_id, activity_type, content_id, metadata),
+        (user_id, user_ref, event_time, activity_id, activity_type, content_id, content_ref, metadata),
     )
     batch.add(
         insert_by_day,
-        (event_date, event_time, activity_id, user_id, activity_type, content_id),
+        (event_date, event_time, activity_id, user_id, user_ref, activity_type, content_id, content_ref),
     )
 
     # Only write to activity_by_content when a content_id is provided
@@ -177,13 +231,13 @@ def log_activity(
         insert_by_content = session.prepare(
             """
             INSERT INTO activity_by_content
-                (content_id, timestamp, activity_id, user_id, activity_type, metadata)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (content_id, content_ref, timestamp, activity_id, user_id, user_ref, activity_type, metadata)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """
         )
         batch.add(
             insert_by_content,
-            (content_id, event_time, activity_id, user_id, activity_type, metadata),
+            (content_id, content_ref, event_time, activity_id, user_id, user_ref, activity_type, metadata),
         )
 
     session.execute(batch)
@@ -200,7 +254,9 @@ def log_activity(
         "timestamp": event_time,
         "date": event_date,
         "activity_type": activity_type,
-        "content_id": content_id,
+        "content_id": content_ref or content_id,
+        "user_ref": user_ref,
+        "content_ref": content_ref,
         "metadata": metadata,
     }
 
@@ -219,7 +275,7 @@ def get_activity_history(
     normalized_fetch_limit = max(_normalize_limit(fetch_limit, default=1000), normalized_limit)
     statement = session.prepare(
         f"""
-        SELECT user_id, timestamp, activity_id, activity_type, content_id, metadata
+        SELECT user_id, user_ref, timestamp, activity_id, activity_type, content_id, content_ref, metadata
         FROM activity_by_user
         WHERE user_id = ?
         LIMIT {normalized_fetch_limit}
@@ -261,14 +317,21 @@ def get_daily_active_users(session, query_date):
 def get_content_metrics(session, content_id):
     statement = session.prepare(
         """
-        SELECT activity_type FROM activity_by_content
+        SELECT activity_type, content_ref FROM activity_by_content
         WHERE content_id = ?
         """
     )
     rows = session.execute(statement, (content_id,))
+    content_ref = None
     metrics = Counter(row.activity_type for row in rows)
+    rows = session.execute(statement, (content_id,))
+    for row in rows:
+        if getattr(row, "content_ref", None):
+            content_ref = row.content_ref
+            break
     return {
         "content_id": content_id,
+        "content_ref": content_ref,
         "total_interactions": sum(metrics.values()),
         "by_type": dict(sorted(metrics.items())),
     }
@@ -304,23 +367,28 @@ def get_trending_content(session, query_date, limit=10):
     normalized_limit = _normalize_limit(limit, default=10)
     statement = session.prepare(
         """
-        SELECT content_id FROM activity_by_day
+        SELECT content_id, content_ref FROM activity_by_day
         WHERE date = ?
         """
     )
     rows = session.execute(statement, (query_date,))
 
-    content_counts = Counter(row.content_id for row in rows if row.content_id is not None)
+    content_counts = Counter(
+        (row.content_id, getattr(row, "content_ref", None))
+        for row in rows
+        if row.content_id is not None
+    )
     ranked = sorted(
         content_counts.items(),
-        key=lambda item: (-item[1], str(item[0])),
+        key=lambda item: (-item[1], item[0][1] or str(item[0][0])),
     )[:normalized_limit]
 
     return [
         {
             "content_id": content_id,
+            "content_ref": content_ref,
             "interaction_count": interaction_count,
             "engagement_score": interaction_count,
         }
-        for content_id, interaction_count in ranked
+        for (content_id, content_ref), interaction_count in ranked
     ]

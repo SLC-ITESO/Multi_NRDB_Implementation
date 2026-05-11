@@ -306,8 +306,7 @@ def mongo_login(args):
     mongo_client_py.mongo_login(args)
 
 def mongo_logoff(args):
-    os.remove(mongo_client_py.SESSION_FILE)
-    print("User logged off")
+    mongo_client_py.mongo_logout()
 
 def mongo_update(args):
     print("ENTRO A MONGO_UPDATE")

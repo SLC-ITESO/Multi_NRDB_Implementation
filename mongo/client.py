@@ -1,5 +1,7 @@
 import os
 from traceback import print_tb
+import sys
+import logging
 
 import requests
 import hashlib
@@ -7,6 +9,21 @@ import json
 
 PROJECT_API_URL = os.getenv("PROJECT_API_URL", "http://localhost:8000")
 SESSION_FILE = ".session.json"
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+CASSANDRA_DIR = os.path.join(PROJECT_ROOT, "cassandra")
+
+if CASSANDRA_DIR not in sys.path:
+    sys.path.insert(0, CASSANDRA_DIR)
+
+try:
+    import fixtures as cassandra_fixtures
+except Exception as exc:
+    cassandra_fixtures = None
+    CASSANDRA_IMPORT_ERROR = exc
+else:
+    CASSANDRA_IMPORT_ERROR = None
+
+log = logging.getLogger(__name__)
 
 def get_authenticated_user():
     if not os.path.exists(SESSION_FILE):
@@ -14,6 +31,37 @@ def get_authenticated_user():
         return None
     with open(SESSION_FILE, "r") as f:
         return json.load(f)
+
+
+def _log_cassandra_session(user_id, event_type, metadata=None):
+    if cassandra_fixtures is None:
+        if CASSANDRA_IMPORT_ERROR is not None:
+            log.warning("Cassandra fixtures import failed: %s", CASSANDRA_IMPORT_ERROR)
+        return
+
+    try:
+        cassandra_fixtures.log_session_event(user_id, event_type, metadata=metadata)
+    except Exception as exc:
+        log.warning("Cassandra session logging failed: %s", exc)
+        print(f"Warning: Mongo action succeeded, but Cassandra session logging failed: {exc}")
+
+
+def _log_cassandra_activity(user_id, activity_type, content_id=None, metadata=None):
+    if cassandra_fixtures is None:
+        if CASSANDRA_IMPORT_ERROR is not None:
+            log.warning("Cassandra fixtures import failed: %s", CASSANDRA_IMPORT_ERROR)
+        return
+
+    try:
+        cassandra_fixtures.log_activity_event(
+            user_id,
+            activity_type,
+            content_id=content_id,
+            metadata=metadata,
+        )
+    except Exception as exc:
+        log.warning("Cassandra activity logging failed: %s", exc)
+        print(f"Warning: Mongo action succeeded, but Cassandra activity logging failed: {exc}")
 
 def mongo_register(args):
 
@@ -56,9 +104,36 @@ def mongo_login(args):
         user_info = x.json()
         with open(SESSION_FILE, "w") as f:
             json.dump(user_info, f)
+        _log_cassandra_session(
+            user_info["user_id"],
+            "login",
+            metadata={
+                "source": "mongo_login",
+                "username": user_info["username"],
+                "email": user_info["email"],
+            },
+        )
         print(f"User {user_info['username']} logged in successfully")
     else:
         print(f"Login failed {x.status_code} - {x.text}")
+
+
+def mongo_logout():
+    user = get_authenticated_user()
+    if not user:
+        return
+
+    _log_cassandra_session(
+        user["user_id"],
+        "logout",
+        metadata={
+            "source": "mongo_logout",
+            "username": user.get("username"),
+            "email": user.get("email"),
+        },
+    )
+    os.remove(SESSION_FILE)
+    print("User logged off")
 
 def mongo_update(args):
     user = get_authenticated_user()
@@ -236,6 +311,16 @@ def mongo_like_content(args):
     x = requests.post(endpoint_like, json=like_data)
 
     if x.ok:
+        _log_cassandra_activity(
+            user["user_id"],
+            "like",
+            content_id=args.content_id,
+            metadata={
+                "source": "mongo_like_content",
+                "content_title": content["title"],
+                "username": user["username"],
+            },
+        )
         print(f"Content '{content['title']}' liked successfully!")
     else:
         print(f"Failed to like content: {x.status_code} - {x.text}")
@@ -276,6 +361,17 @@ def mongo_comment_content(args):
     x = requests.post(endpoint_comment, json=comment_data)
 
     if x.ok:
+        _log_cassandra_activity(
+            user["user_id"],
+            "comment",
+            content_id=args.content_id,
+            metadata={
+                "source": "mongo_comment_content",
+                "content_title": content["title"],
+                "username": user["username"],
+                "text": args.text,
+            },
+        )
         print(f"Commented on content '{content['title']}' successfully!")
     else:
         print(f"Failed to comment: {x.status_code} - {x.text}")
@@ -360,6 +456,18 @@ def mongo_share_content(args):
 
     x = requests.post(endpoint_share, json=share_data)
     if x.ok:
+        _log_cassandra_activity(
+            user["user_id"],
+            "share_internal",
+            content_id=args.content_id,
+            metadata={
+                "source": "mongo_share_content",
+                "content_title": content["title"],
+                "from_username": user["username"],
+                "to_user_id": target_user["_id"],
+                "to_username": target_user["username"],
+            },
+        )
         print(f"Content '{content['title']}' shared successfully with {target_user['username']}!")
     else:
         print(f"Failed to share: {x.status_code} - {x.text}")
@@ -398,6 +506,17 @@ def mongo_share_content_ext(args):
 
     x = requests.post(endpoint_share, json=share_data)
     if x.ok:
+        _log_cassandra_activity(
+            user["user_id"],
+            "share_external",
+            content_id=args.content_id,
+            metadata={
+                "source": "mongo_share_content_ext",
+                "content_title": content["title"],
+                "username": user["username"],
+                "platform": args.platform,
+            },
+        )
         print(f"Content '{content['title']}' shared on {args.platform} successfully!")
     else:
         print(f"Failed to share externally: {x.status_code} - {x.text}")
@@ -419,6 +538,17 @@ def mongo_create_note(args):
     
     response = requests.post(endpoint, json=data)
     if response.ok:
+        note = response.json()
+        _log_cassandra_activity(
+            user["user_id"],
+            "note",
+            metadata={
+                "source": "mongo_create_note",
+                "note_id": note["_id"],
+                "title": args.title,
+                "username": user["username"],
+            },
+        )
         print(f"Note created with id {response.json()['_id']}")
     else:
         print(f"Failed to create note: {response.status_code} - {response.text}")
