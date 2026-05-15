@@ -8,3 +8,6 @@ tests/
 .session.json
 chroma_db/
 venv
+chroma_db/
+
+
