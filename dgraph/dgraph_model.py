@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import os
+import time
 from datetime import datetime, timezone
 
 import requests
+
+from seed_data import DEMO_ATTENDANCE, DEMO_EVENTS, DEMO_FOLLOWS, DEMO_USERS
 
 
 DGRAPH_ALPHA_URL = os.getenv("DGRAPH_ALPHA_URL", "http://localhost:8080")
@@ -51,16 +54,13 @@ type Interest {
 
 
 SEED_USERS = [
-    ("u1", "mariano", "Guadalajara", ["prayer", "meditation"]),
-    ("u2", "german", "Guadalajara", ["prayer", "community"]),
-    ("u3", "santiago", "Zapopan", ["meditation"]),
-    ("u4", "ana", "Guadalajara", ["community"]),
+    (user["id"], user["username"], user["location"], user["preferences"])
+    for user in DEMO_USERS
 ]
 
 SEED_EVENTS = [
-    ("e1", "Prayer Circle", "Guadalajara", "2026-06-03T18:00:00Z", ["prayer"]),
-    ("e2", "Community Service", "Guadalajara", "2026-06-12T09:00:00Z", ["community"]),
-    ("e3", "Meditation Meetup", "Zapopan", "2026-06-07T17:00:00Z", ["meditation"]),
+    (event["id"], event["title"], event["location"], event["start_date"], event["topics"])
+    for event in DEMO_EVENTS
 ]
 
 
@@ -77,6 +77,7 @@ def setup_schema():
 
 def seed_graph():
     # This function creates the basic graph data so we can test the Dgraph queries.
+    clear_data()
     setup_schema()
 
     for user_id, username, location, interests in SEED_USERS:
@@ -91,20 +92,30 @@ def seed_graph():
             save_interest(topic)
             add_edge("event_id", event_id, "event_topic", "interest_name", topic)
 
-    add_edge("user_id", "u1", "follows", "user_id", "u2")
-    add_edge("user_id", "u1", "follows", "user_id", "u3")
-    add_edge("user_id", "u2", "follows", "user_id", "u4")
-    add_edge("user_id", "u2", "attends", "event_id", "e1")
-    add_edge("user_id", "u4", "attends", "event_id", "e2")
-    add_edge("user_id", "u3", "attends", "event_id", "e3")
+    for source_user_id, target_user_id in DEMO_FOLLOWS:
+        if not edge_exists("user_id", source_user_id, "follows", "user_id", target_user_id):
+            add_edge("user_id", source_user_id, "follows", "user_id", target_user_id)
+
+    for user_id, event_id in DEMO_ATTENDANCE:
+        if not edge_exists("user_id", user_id, "attends", "event_id", event_id):
+            add_edge("user_id", user_id, "attends", "event_id", event_id)
 
     return {"message": "Dgraph seed data loaded"}
 
 
+def clear_data():
+    # Seed is meant to rebuild the demo graph, so we clear old graph nodes first.
+    # This prevents old test users like u1/u2/u3 from staying in graph_summary.
+    response = requests.post(
+        f"{DGRAPH_ALPHA_URL}/alter",
+        json={"drop_op": "DATA"},
+    )
+    _check_response(response)
+
+
 def ensure_user_from_session(user):
-    # MongoDB owns the real login user, but Dgraph needs its own User node for graph queries.
-    # This small sync keeps the school demo simple: if the session user is missing in Dgraph,
-    # we create it and connect it to Interest nodes from the user's preferences.
+    # MongoDB owns the login user, but Dgraph needs a User node for graph queries.
+    # We keep the same id so recommendations can start from the logged-in Mongo user.
     user_id = user.get("user_id")
     if not user_id:
         raise ValueError("Session user does not have user_id")
@@ -360,12 +371,21 @@ def _query(query_text):
 
 def _mutate(rdf):
     mutation_text = "{\nset {\n" + rdf.strip() + "\n}\n}"
-    response = requests.post(
-        f"{DGRAPH_ALPHA_URL}/mutate?commitNow=true",
-        data=mutation_text,
-        headers={"Content-Type": "application/rdf"},
-    )
-    return _check_response(response)
+    last_error = None
+    for attempt in range(3):
+        response = requests.post(
+            f"{DGRAPH_ALPHA_URL}/mutate?commitNow=true",
+            data=mutation_text,
+            headers={"Content-Type": "application/rdf"},
+        )
+        try:
+            return _check_response(response)
+        except RuntimeError as exc:
+            last_error = exc
+            if "Transaction has been aborted" not in str(exc) or attempt == 2:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+    raise last_error
 
 
 def _check_response(response):

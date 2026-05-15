@@ -46,6 +46,14 @@ def rag_context(args):
     _print_response(response)
 
 
+def rag_answer(args):
+    response = requests.get(
+        PROJECT_API_URL + "/chroma/rag-answer",
+        params={"query": args.query, "limit": args.limit},
+    )
+    _print_response(response)
+
+
 def recommend_content(args):
     # This command uses the logged-in user's preferences when available.
     user = get_authenticated_user()

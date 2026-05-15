@@ -21,6 +21,10 @@ class ChromaResource:
             if not query:
                 raise falcon.HTTPBadRequest(title="Missing query")
             resp.media = chroma_model.rag_context(query, limit)
+        elif action == "rag-answer":
+            if not query:
+                raise falcon.HTTPBadRequest(title="Missing query")
+            resp.media = chroma_model.rag_answer(query, limit)
         elif action == "recommend-content":
             preferences = req.get_param("preferences")
             if not preferences:

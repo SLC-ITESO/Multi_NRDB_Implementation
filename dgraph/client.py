@@ -4,6 +4,7 @@ import os
 import requests
 
 from dgraph import dgraph_model
+from event_log import log_event
 
 
 PROJECT_API_URL = os.getenv("PROJECT_API_URL", "http://localhost:8000")
@@ -75,6 +76,13 @@ def follow_user(args):
         "target_user_id": args.user_id,
     }
     response = requests.post(PROJECT_API_URL + "/graph/follow", json=payload)
+    if response.ok:
+        log_event(
+            "follow",
+            user_id=user["user_id"],
+            username=user.get("username"),
+            metadata={"target_user_id": args.user_id},
+        )
     _print_response(response)
 
 
@@ -128,6 +136,13 @@ def attend_event(args):
         "event_id": args.event_id,
     }
     response = requests.post(PROJECT_API_URL + "/graph/attend", json=payload)
+    if response.ok:
+        log_event(
+            "attend_event",
+            user_id=user["user_id"],
+            username=user.get("username"),
+            metadata={"event_id": args.event_id},
+        )
     _print_response(response)
 
 

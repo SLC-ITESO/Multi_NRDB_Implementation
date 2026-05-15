@@ -13,7 +13,7 @@ import cassandra_model as model
 
 log = logging.getLogger(__name__)
 
-DEFAULT_CONTACT_POINTS = "localhost,node01"
+DEFAULT_CONTACT_POINTS = "localhost"
 USER_ID_NAMESPACE = uuid.UUID("5d9a7c90-224a-4d49-a89e-56f4ef8d6f1a")
 CONTENT_ID_NAMESPACE = uuid.UUID("7e24db34-719a-4543-96a7-f9c0f493b8ae")
 CLUSTER_IPS = [

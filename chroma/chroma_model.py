@@ -108,6 +108,41 @@ def rag_context(query, limit=3):
     }
 
 
+def rag_answer(query, limit=3):
+    # This is a local demo RAG answer.
+    # It retrieves semantic context from ChromaDB and builds a small template answer.
+    # No paid API key or external LLM is required for the class demo.
+    results = semantic_search(query, limit)
+    if not results:
+        return {
+            "query": query,
+            "answer": "Local demo RAG answer: no matching context was found.",
+            "sources": [],
+        }
+
+    sources = [
+        {
+            "id": item["id"],
+            "title": item["title"],
+            "type": item["type"],
+            "tags": item["tags"],
+        }
+        for item in results
+    ]
+    top_titles = ", ".join(item["title"] for item in results[:2])
+    answer = (
+        "Local demo RAG answer (template-based, not an external LLM): "
+        f"the closest retrieved content is {top_titles}. "
+        "Use these sources as the context for answering the question."
+    )
+    return {
+        "query": query,
+        "answer": answer,
+        "sources": sources,
+        "context": "\n\n".join(f"{item['title']}: {item['document']}" for item in results),
+    }
+
+
 def _collection():
     chromadb = _chromadb()
     embedding_function = _embedding_function()

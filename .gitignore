@@ -6,4 +6,5 @@ tests/
 
 *.log
 .session.json
+chroma_db/
 venv

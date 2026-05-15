@@ -1,27 +1,16 @@
 import os
 from traceback import print_tb
-import sys
 import logging
 
 import requests
 import hashlib
 import json
 
+from event_log import log_event
+from dgraph import dgraph_model
+
 PROJECT_API_URL = os.getenv("PROJECT_API_URL", "http://localhost:8000")
 SESSION_FILE = ".session.json"
-PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
-CASSANDRA_DIR = os.path.join(PROJECT_ROOT, "cassandra")
-
-if CASSANDRA_DIR not in sys.path:
-    sys.path.insert(0, CASSANDRA_DIR)
-
-try:
-    import fixtures as cassandra_fixtures
-except Exception as exc:
-    cassandra_fixtures = None
-    CASSANDRA_IMPORT_ERROR = exc
-else:
-    CASSANDRA_IMPORT_ERROR = None
 
 log = logging.getLogger(__name__)
 
@@ -33,35 +22,48 @@ def get_authenticated_user():
         return json.load(f)
 
 
-def _log_cassandra_session(user_id, event_type, metadata=None):
-    if cassandra_fixtures is None:
-        if CASSANDRA_IMPORT_ERROR is not None:
-            log.warning("Cassandra fixtures import failed: %s", CASSANDRA_IMPORT_ERROR)
-        return
-
+def _log_app_event(user_id, event_type, content_id=None, metadata=None):
+    user = get_authenticated_user() if os.path.exists(SESSION_FILE) else {}
     try:
-        cassandra_fixtures.log_session_event(user_id, event_type, metadata=metadata)
-    except Exception as exc:
-        log.warning("Cassandra session logging failed: %s", exc)
-        print(f"Warning: Mongo action succeeded, but Cassandra session logging failed: {exc}")
-
-
-def _log_cassandra_activity(user_id, activity_type, content_id=None, metadata=None):
-    if cassandra_fixtures is None:
-        if CASSANDRA_IMPORT_ERROR is not None:
-            log.warning("Cassandra fixtures import failed: %s", CASSANDRA_IMPORT_ERROR)
-        return
-
-    try:
-        cassandra_fixtures.log_activity_event(
-            user_id,
-            activity_type,
+        log_event(
+            event_type,
+            user_id=user_id,
+            username=user.get("username"),
             content_id=content_id,
             metadata=metadata,
         )
     except Exception as exc:
-        log.warning("Cassandra activity logging failed: %s", exc)
-        print(f"Warning: Mongo action succeeded, but Cassandra activity logging failed: {exc}")
+        log.warning("Application event logging failed: %s", exc)
+
+
+def _sync_user_to_dgraph(user):
+    # MongoDB stores the profile, but Dgraph needs the same user id for graph commands.
+    # If Dgraph is not ready yet, the Mongo action still succeeds and we can sync later.
+    try:
+        dgraph_model.ensure_user_from_session(user)
+    except Exception as exc:
+        log.warning("Dgraph user sync skipped: %s", exc)
+
+
+def _sync_profile_to_dgraph(user_id, email=None):
+    params = {"user_id": user_id}
+    if email:
+        params = {"email": email}
+    try:
+        response = requests.get(PROJECT_API_URL + "/user", params=params)
+        if response.ok and response.json():
+            profile = response.json()[0]
+            _sync_user_to_dgraph(
+                {
+                    "user_id": profile["_id"],
+                    "username": profile.get("username"),
+                    "email": profile.get("email"),
+                    "location": profile.get("location"),
+                    "preferences": profile.get("preferences"),
+                }
+            )
+    except requests.RequestException as exc:
+        log.warning("Could not fetch profile for Dgraph sync: %s", exc)
 
 def mongo_register(args):
 
@@ -84,7 +86,26 @@ def mongo_register(args):
     x = requests.post(endpoint, json=user)
 
     if x.ok:
-        print(f"User {user['username']} created with id {x.json()['_id']}")
+        created_user = x.json()
+        _sync_user_to_dgraph(
+            {
+                "user_id": created_user["_id"],
+                "username": created_user.get("username"),
+                "email": created_user.get("email"),
+                "location": created_user.get("location"),
+                "preferences": created_user.get("preferences"),
+            }
+        )
+        try:
+            log_event(
+                "register",
+                user_id=created_user["_id"],
+                username=created_user.get("username"),
+                metadata={"email": created_user.get("email")},
+            )
+        except Exception as exc:
+            log.warning("Application event logging failed: %s", exc)
+        print(f"User {user['username']} created with id {created_user['_id']}")
     else:
         print(f"Failed to create user {x.status_code} - {x.text}")
 
@@ -104,7 +125,7 @@ def mongo_login(args):
         user_info = x.json()
         with open(SESSION_FILE, "w") as f:
             json.dump(user_info, f)
-        _log_cassandra_session(
+        _log_app_event(
             user_info["user_id"],
             "login",
             metadata={
@@ -123,7 +144,7 @@ def mongo_logout():
     if not user:
         return
 
-    _log_cassandra_session(
+    _log_app_event(
         user["user_id"],
         "logout",
         metadata={
@@ -174,6 +195,7 @@ def mongo_update(args):
     x = requests.put(endpoint, json=update_data)
     
     if x.ok:
+        _sync_profile_to_dgraph(user["user_id"], email=user.get("email"))
         print("User updated successfully!")
     else:
         print(f"Update failed: {x.status_code} - {x.text}")
@@ -192,6 +214,7 @@ def mongo_add_pref(args):
     x = requests.put(endpoint, json=update_data)
 
     if x.ok:
+        _sync_profile_to_dgraph(user["user_id"], email=user.get("email"))
         print("User updated successfully!")
     else:
         print(f"Update failed: {x.status_code} - {x.text}")
@@ -241,6 +264,7 @@ def mongo_rem_pref(args):
         x = requests.put(endpoint, json=update_data)
         
         if x.ok:
+            _sync_profile_to_dgraph(user["user_id"], email=user.get("email"))
             print(f"Preference '{removed_pref}' removed successfully!")
         else:
             print(f"Update failed: {x.status_code} - {x.text}")
@@ -272,6 +296,13 @@ def mongo_create_content(args):
     x = requests.post(endpoint, json=content)
     
     if x.ok:
+        created = x.json()
+        _log_app_event(
+            user["user_id"],
+            "create_content",
+            content_id=created.get("_id"),
+            metadata={"title": args.title, "type": args.type},
+        )
         print(f"Content '{args.title}' created successfully!")
     else:
         print(f"Failed to create content: {x.status_code} - {x.text}")
@@ -311,7 +342,7 @@ def mongo_like_content(args):
     x = requests.post(endpoint_like, json=like_data)
 
     if x.ok:
-        _log_cassandra_activity(
+        _log_app_event(
             user["user_id"],
             "like",
             content_id=args.content_id,
@@ -361,7 +392,7 @@ def mongo_comment_content(args):
     x = requests.post(endpoint_comment, json=comment_data)
 
     if x.ok:
-        _log_cassandra_activity(
+        _log_app_event(
             user["user_id"],
             "comment",
             content_id=args.content_id,
@@ -456,7 +487,7 @@ def mongo_share_content(args):
 
     x = requests.post(endpoint_share, json=share_data)
     if x.ok:
-        _log_cassandra_activity(
+        _log_app_event(
             user["user_id"],
             "share_internal",
             content_id=args.content_id,
@@ -506,7 +537,7 @@ def mongo_share_content_ext(args):
 
     x = requests.post(endpoint_share, json=share_data)
     if x.ok:
-        _log_cassandra_activity(
+        _log_app_event(
             user["user_id"],
             "share_external",
             content_id=args.content_id,
@@ -539,7 +570,7 @@ def mongo_create_note(args):
     response = requests.post(endpoint, json=data)
     if response.ok:
         note = response.json()
-        _log_cassandra_activity(
+        _log_app_event(
             user["user_id"],
             "note",
             metadata={

@@ -12,13 +12,17 @@ import argparse
 import sys
 import csv
 import os
+import hashlib
+from datetime import datetime
 
+from bson.objectid import ObjectId
 from mongo import client as mongo_client_py
 from mongo import resources
 from dgraph import client as dgraph_client_py
 from dgraph import resources as dgraph_resources
 from chroma import client as chroma_client_py
 from chroma import resources as chroma_resources
+from seed_data import DEMO_CONTENT, DEMO_PASSWORD, DEMO_USERS
 
 CASSANDRA_DIR = os.path.join(os.path.dirname(__file__), "cassandra")
 if CASSANDRA_DIR not in sys.path:
@@ -176,6 +180,12 @@ def build_parser():
     # Add data
     add_data = subparsers.add_parser('add_data', help='Add data to the database')
     add_data.set_defaults(func=populate_dbs)
+
+    seed = subparsers.add_parser('seed', help='Load the shared demo seed data')
+    seed.set_defaults(func=populate_dbs)
+
+    content_stats = subparsers.add_parser('content_stats', help='Show MongoDB content engagement aggregation')
+    content_stats.set_defaults(func=mongo_content_stats)
     # DGRAPH
     dgraph_setup = subparsers.add_parser('dgraph_setup', help='Install the Dgraph schema')
     dgraph_setup.set_defaults(func=dgraph_setup_schema)
@@ -231,6 +241,11 @@ def build_parser():
     rag_context.add_argument('--query', "-q", help='User question', type=str, required=True)
     rag_context.add_argument('--limit', "-l", help='Number of context items', type=int, default=3)
     rag_context.set_defaults(func=chroma_rag_context)
+
+    rag_answer = subparsers.add_parser('rag_answer', help='Retrieve context and print a local demo RAG answer')
+    rag_answer.add_argument('--query', "-q", help='User question', type=str, required=True)
+    rag_answer.add_argument('--limit', "-l", help='Number of context items', type=int, default=3)
+    rag_answer.set_defaults(func=chroma_rag_answer)
 
     usr_recommend_content.set_defaults(func=chroma_recommend_content)
     usr_recommend_content.add_argument('--preferences', "-p", help='Preferences if no session preferences exist', type=str)
@@ -370,6 +385,52 @@ def mongo_delete_note(args):
     #print("ENTRO A MONGO_DELETE_NOTE")
     mongo_client_py.mongo_delete_note(args)
 
+def mongo_content_stats(args):
+    # MongoDB aggregation demo for the rubric.
+    # It joins content with likes/comments collections and counts engagement per content item.
+    pipeline = [
+        {
+            "$lookup": {
+                "from": "contentLikes",
+                "localField": "_id",
+                "foreignField": "content.content_id",
+                "as": "likes",
+            }
+        },
+        {
+            "$lookup": {
+                "from": "commentResource",
+                "localField": "_id",
+                "foreignField": "content.content_id",
+                "as": "comments",
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "content_id": {"$toString": "$_id"},
+                "title": 1,
+                "type": 1,
+                "creator": "$created_by.username",
+                "likes_count": {"$size": "$likes"},
+                "comments_count": {"$size": "$comments"},
+                "total_engagement": {"$add": [{"$size": "$likes"}, {"$size": "$comments"}]},
+            }
+        },
+        {"$sort": {"total_engagement": -1, "title": 1}},
+    ]
+    results = list(mongo_db.content.aggregate(pipeline))
+    if not results:
+        print("No content found.")
+        return
+    for item in results:
+        print(
+            f"{item['title']} [{item['type']}] "
+            f"creator={item.get('creator', '-')} "
+            f"likes={item['likes_count']} comments={item['comments_count']} "
+            f"total={item['total_engagement']} id={item['content_id']}"
+        )
+
 def dgraph_setup_schema(args):
     dgraph_client_py.dgraph_setup(args)
 
@@ -409,40 +470,144 @@ def chroma_semantic_search(args):
 def chroma_rag_context(args):
     chroma_client_py.rag_context(args)
 
+def chroma_rag_answer(args):
+    chroma_client_py.rag_answer(args)
+
 def chroma_recommend_content(args):
     chroma_client_py.recommend_content(args)
 
 def populate_dbs(args):
-    # MONGODB
-    print("Populating MongoDB with data...")
+    # This is the one seed command for the demo.
+    # MongoDB and Dgraph use the same user ids from seed_data.py.
+    print("Creating MongoDB indexes...")
+    _setup_mongo_indexes()
 
-    # Registers two users
-    users = [
-        {"username": "FatherJohn", "email": "father@church.org", "password": "pass", "age": 50, "location": "Vatican", "preferences": "prayer,bible"},
-        {"username": "SisterMary", "email": "sister@church.org", "password": "pass", "age": 40, "location": "Dublin", "preferences": "meditation,service"}
-    ]
+    print("Seeding MongoDB...")
+    _seed_mongodb()
 
-    for user in users:
-        print(f"Registering user: {user['username']}")
-        # Create a mock args namespace
-        mock_args = argparse.Namespace(**user)
-        mongo_client_py.mongo_register(mock_args)
+    print("Seeding Dgraph...")
+    dgraph_client_py.dgraph_setup(args)
+    dgraph_client_py.dgraph_seed(args)
 
-    # Login and create content as FatherJohn
-    print("Logging in FatherJohn...")
-    login_args = argparse.Namespace(email="father@church.org", password="pass")
-    mongo_client_py.mongo_login(login_args)
+    print("Seeding ChromaDB...")
+    chroma_client_py.chroma_setup(args)
+    chroma_client_py.chroma_seed(args)
 
-    print("Creating content...")
-    content = [
-        {"title": "The Beatitudes", "type": "text"},
-        {"title": "Morning Prayer", "type": "audio"}
-    ]
-    for c in content:
-        mock_args = argparse.Namespace(**c)
-        mongo_client_py.mongo_create_content(mock_args)
+    if os.path.exists(".session.json"):
+        os.remove(".session.json")
+        print("Local session cleared. Login again before running user commands.")
 
-    mongo_logoff(args)
+    print("Seed complete. Demo login: demo@mail.com / 1234")
+
+
+def _seed_mongodb():
+    now = datetime.now()
+    password_hash = hashlib.sha256(DEMO_PASSWORD.encode("utf-8")).hexdigest()
+    users_by_id = {user["id"]: user for user in DEMO_USERS}
+    user_object_ids = [ObjectId(user["id"]) for user in DEMO_USERS]
+    content_object_ids = [ObjectId(content["id"]) for content in DEMO_CONTENT]
+
+    # These deletes only clean records connected to the shared demo ids.
+    # That keeps the seed repeatable without wiping unrelated manual test data.
+    mongo_db.contentLikes.delete_many(
+        {"$or": [{"user.user_id": {"$in": user_object_ids}}, {"content.content_id": {"$in": content_object_ids}}]}
+    )
+    mongo_db.commentResource.delete_many(
+        {"$or": [{"user.user_id": {"$in": user_object_ids}}, {"content.content_id": {"$in": content_object_ids}}]}
+    )
+    mongo_db.internalShareResource.delete_many(
+        {
+            "$or": [
+                {"from_user.user_id": {"$in": user_object_ids}},
+                {"to_user.user_id": {"$in": user_object_ids}},
+                {"content.content_id": {"$in": content_object_ids}},
+            ]
+        }
+    )
+    mongo_db.externalShareResource.delete_many(
+        {"$or": [{"user.user_id": {"$in": user_object_ids}}, {"content.content_id": {"$in": content_object_ids}}]}
+    )
+    mongo_db.notesResource.delete_many({"user.user_id": {"$in": user_object_ids}})
+
+    for user in DEMO_USERS:
+        mongo_db.users.delete_many(
+            {
+                "email": user["email"],
+                "_id": {"$ne": ObjectId(user["id"])},
+            }
+        )
+        mongo_db.users.update_one(
+            {"_id": ObjectId(user["id"])},
+            {
+                "$set": {
+                    "username": user["username"],
+                    "email": user["email"],
+                    "password_hash": password_hash,
+                    "age": user["age"],
+                    "location": user["location"],
+                    "preferences": user["preferences"],
+                    "updated_at": now,
+                },
+                "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
+        )
+
+    for content in DEMO_CONTENT:
+        creator = users_by_id[content["created_by"]]
+        mongo_db.content.update_one(
+            {"_id": ObjectId(content["id"])},
+            {
+                "$set": {
+                    "title": content["title"],
+                    "type": content["type"],
+                    "created_by": {
+                        "user_id": ObjectId(creator["id"]),
+                        "username": creator["username"],
+                    },
+                    "likes_count": 0,
+                    "comments_count": 0,
+                    "shares_count": 0,
+                },
+                "$setOnInsert": {
+                    "created_at": now,
+                    "recent_likes": [],
+                    "recent_comments": [],
+                },
+            },
+            upsert=True,
+        )
+
+    print(f"MongoDB seed loaded: {len(DEMO_USERS)} users, {len(DEMO_CONTENT)} content items")
+
+
+def _setup_mongo_indexes():
+    # These indexes support the exact filters used by the CLI/API commands.
+    # They are created with create_index so running seed more than once is safe.
+    mongo_db.users.create_index("email")
+    mongo_db.users.create_index("username")
+    mongo_db.users.create_index("location")
+    mongo_db.users.create_index("preferences")
+
+    mongo_db.content.create_index("created_by.user_id")
+    mongo_db.content.create_index("type")
+    mongo_db.content.create_index("created_at")
+
+    mongo_db.commentResource.create_index("content.content_id")
+    mongo_db.commentResource.create_index("user.user_id")
+
+    mongo_db.contentLikes.create_index([("user.user_id", 1), ("content.content_id", 1)])
+
+    mongo_db.internalShareResource.create_index("from_user.user_id")
+    mongo_db.internalShareResource.create_index("to_user.user_id")
+    mongo_db.internalShareResource.create_index("content.content_id")
+
+    mongo_db.externalShareResource.create_index("platform")
+    mongo_db.externalShareResource.create_index("user.user_id")
+    mongo_db.externalShareResource.create_index("content.content_id")
+
+    mongo_db.notesResource.create_index("user.user_id")
+    mongo_db.notesResource.create_index("created_at")
 
 
 if __name__ == "__main__":

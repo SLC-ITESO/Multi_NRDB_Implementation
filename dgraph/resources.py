@@ -22,7 +22,7 @@ class DgraphResource:
             resp.media = dgraph_model.recommend_users(user_id)
         elif action == "recommend-users-by-location":
             resp.media = dgraph_model.recommend_users_by_location(user_id)
-        elif action == "local-events": # AQUI ME QUEDE
+        elif action == "local-events":
             resp.media = dgraph_model.local_events(user_id)
         elif action == "recommend-events":
             resp.media = dgraph_model.recommend_events(user_id)
